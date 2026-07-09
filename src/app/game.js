@@ -22,6 +22,7 @@ import { makeInput, REBINDABLE_ACTIONS } from './input.js';
 import { render, COLORS } from './renderer.js';
 import { saveGame, clearSave } from './save.js';
 import { nightAmount } from './daynight-tint.js';
+import { flashOpacity } from './flash-decay.js';
 import { makeAudio } from './audio.js';
 import { makeBindingsUI } from './bindings-ui.js';
 
@@ -72,6 +73,11 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     // eases out after the player stops charging, duration set per the
     // aura-% held at release (see handleWorld's charge-transition below).
     auraFadeActive: false, auraFadeStart: 0, auraFadeDuration: 0,
+    // Flashbang whiteout (renderer.js): one authoritative discrete event
+    // (`flash_detonated`, carrying intensity) stamped here as a wall-clock
+    // start; the actual opacity-over-time is computed fresh every frame by
+    // flash-decay.js, never advanced/ticked in state here.
+    flashActive: false, flashStart: 0, flashIntensity: 0,
   };
   if (!initialWorld) {
     view.modal = mkDialog('THE ANSWERING DEEP', CONTENT.arc.intro, 'continue');
@@ -184,6 +190,10 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
         }
         break;
       case 'player_hit': toast(`Took ${e.dmg} damage`); hitStop(60); shake(Math.min(8, 3 + e.dmg * 0.7), 180); audio.play('hurt'); break;
+      case 'flash_detonated':
+        view.flashActive = true; view.flashStart = frameNow; view.flashIntensity = e.intensity;
+        if (e.intensity > 0) { toast('A flash of white blinds you'); shake(Math.min(6, 2 + e.intensity * 0.04), 200); audio.play('boss'); }
+        break;
       case 'skill_up': toast(`${cap(e.skill)} rose to ${e.lvl}!`); break;
       case 'power_claimed': toast(`Something settles in you — ${cap(e.skill)} ${e.lvl}`); break;
       case 'objective_progress': toast(`${e.at}/${e.of}`); audio.play('quest'); break;
@@ -491,6 +501,7 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     view.playerPunch = Math.max(0, Math.min(1, (playerPunchUntil - now) / PLAYER_PUNCH_MS));
     view.night = nightAmount(world.tick);
     if (view.auraFadeActive && now - view.auraFadeStart >= view.auraFadeDuration) view.auraFadeActive = false;
+    if (view.flashActive && flashOpacity(view.flashIntensity, now - view.flashStart) <= 0) view.flashActive = false;
 
     input.setZones(render(ctx, ro, view, now));
     requestAnimationFrame(frame);

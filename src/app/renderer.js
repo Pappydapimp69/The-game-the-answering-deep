@@ -26,8 +26,12 @@ import { canSense, enemyReadout } from '../sim/info.js';
 import { withHint, keyHint } from './device-labels.js';
 import { describeObjective } from './objective-text.js';
 import { drawPixelSprite } from './pixelart.js';
-import { PLAYER_SPRITES, NPC_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES, TORCH_SPRITES } from './sprites.js';
+import {
+  PLAYER_SPRITES, NPC_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES, TORCH_SPRITES,
+  MOLOTOV_SPRITE, FLASHBANG_SPRITE, FLASHBANG_ARMED_SPRITE,
+} from './sprites.js';
 import { DITHER_DEFS, ditherBucket } from './dither.js';
+import { flashOpacity } from './flash-decay.js';
 
 export const TILE = 24;
 
@@ -301,19 +305,28 @@ export function render(ctx, w, view, now = 0) {
       ctx.restore();
     });
   }
-  // Bottles in flight: interpolate the same way reduce.js does (its
+  // Bottles: in flight, interpolate the same way reduce.js does (its
   // authoritative light source position isn't exposed for reuse here, so the
-  // renderer mirrors the x0+(x1-x0)*t math exactly) and draw a small bright
-  // spark, no sprite needed.
+  // renderer mirrors the x0+(x1-x0)*t math exactly); once landed, an armed
+  // flash bottle just sits at its fixed (x,y) counting down. Molotov and
+  // flash each get their own sprite (sprites.js) — a landed flash also
+  // blinks between primed/blank on a fixed real-time cadence, purely
+  // cosmetic (the actual arm/detonate timer is real sim state, armTicks).
   for (const id of Object.keys(w.hazards.bottles)) {
     const b = w.hazards.bottles[id];
-    const t = Math.max(0, Math.min(1, (w.tick - b.startTick) / b.travelTicks));
-    const bx = Math.round(b.x0 + (b.x1 - b.x0) * t);
-    const by = Math.round(b.y0 + (b.y1 - b.y0) * t);
+    let bx, by;
+    if (b.armed) { bx = b.x; by = b.y; } else {
+      const t = Math.max(0, Math.min(1, (w.tick - b.startTick) / b.travelTicks));
+      bx = Math.round(b.x0 + (b.x1 - b.x0) * t);
+      by = Math.round(b.y0 + (b.y1 - b.y0) * t);
+    }
     add(bx, by, () => {
       const [x, y] = tile(bx, by);
-      ctx.fillStyle = '#ffb347';
-      ctx.beginPath(); ctx.arc(x + TILE / 2, y + TILE / 2, 4, 0, Math.PI * 2); ctx.fill();
+      let def = MOLOTOV_SPRITE;
+      if (b.kind === 'flash') {
+        def = b.armed && Math.floor(now / 250) % 2 === 0 ? FLASHBANG_ARMED_SPRITE : FLASHBANG_SPRITE;
+      }
+      drawPixelSprite(ctx, def, x + TILE / 2 - 4, y + TILE / 2 - 4, 8);
     });
   }
 
@@ -427,6 +440,17 @@ export function render(ctx, w, view, now = 0) {
   if (view.night > 0.05) {
     ctx.fillStyle = `rgba(8,12,34,${(view.night * 0.3).toFixed(3)})`;
     ctx.fillRect(0, 0, W, H);
+  }
+  // Flashbang whiteout: full-screen, proximity-scaled at detonation, then
+  // decays over real time via flash-decay.js's reversed charge-ramp curve —
+  // one authoritative discrete event (view.flashIntensity, stamped at
+  // detonation by game.js) animated here, never ticked down in sim state.
+  if (view.flashActive) {
+    const opacity = flashOpacity(view.flashIntensity, now - view.flashStart);
+    if (opacity > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(opacity / 100).toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   const u = clamp(H / 540, 0.85, 3);

@@ -167,6 +167,10 @@ export function validateContent(c) {
     }
     for (const [id, e] of Object.entries(r.enemies || {})) {
       if (!c.enemyKinds?.[e.kind]) err(`enemy ${id}: unknown kind ${e.kind}`);
+      // `role` is a per-INSTANCE behavior variant (ai.js), not a per-kind
+      // field — only 'flashbang' is defined so far (a lightAverse thrower
+      // that lobs a flash bottle instead of a molotov).
+      if (e.role !== undefined && e.role !== 'flashbang') err(`enemy ${id}: unknown role ${e.role}`);
     }
     for (const [id, p] of Object.entries(r.pickups || {})) {
       if (!c.items?.[p.item]) err(`pickup ${id}: unknown item ${p.item}`);

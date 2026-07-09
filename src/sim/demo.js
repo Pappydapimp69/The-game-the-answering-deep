@@ -49,19 +49,20 @@ export function demoCommands() {
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'into-the-dark' });
   walkTo(20, 10); // the-shallows zone, at Marrow's post — completes quest 1
 
-  // --- Quest 2: Learn to Listen (catch an Igniter — no immunity, melee) ---
-  // Tickless combat (see the header note) keeps it parked at its spawn the
-  // whole time, same as any other kind — MELEE has no light-gate and the
-  // light-averse AI only ever reacts to a TICK, and there isn't one between
-  // arriving and finishing it off.
+  // --- Quest 2: Learn to Listen (catch a Lurker — a familiar face, teaches
+  // the pulse/echo system before the Igniter's hide-and-seek machine shows
+  // up) --- Tickless combat (see the header note) keeps it parked at its
+  // spawn the whole time — MELEE has no light-gate and standard-machine AI
+  // only ever reacts to a TICK, and there isn't one between arriving and
+  // finishing it off.
   walkTo(3, 10);
   cmds.push({ type: 'TALK', npcId: 'wren' }); // offers 'learn-to-listen'
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'learn-to-listen' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' }); // spawn telegraph
   walkTo(13, 19);
-  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter1' });
+  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'lurker1' });
 
-  // --- Quest 3: The Fleeing Kind (catch a second Igniter) -----------------
+  // --- Quest 3: The Fleeing Kind (catch a Shell — aura-immune, melee only) -
   // This TALK actually offers TWO quests now (the-fleeing-kind AND its
   // branch-mate the-burning-kind — see content.js), since 'the-sounding-line'
   // only needs ONE of them done (requiresAny). This replay takes the
@@ -72,7 +73,7 @@ export function demoCommands() {
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'the-fleeing-kind' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' });
   walkTo(21, 15);
-  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter2' });
+  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'shell1' });
 
   // --- Quest 4: The Sounding Line (collect it) ----------------------------
   walkTo(3, 10);
@@ -87,6 +88,10 @@ export function demoCommands() {
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'sound-the-deep' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' });
 
+  // igniter-elite1 carries role: 'flashbang' now (content.js) — tickless
+  // combat means it never actually gets a TICK to throw anything, same as
+  // every other scripted kill here, so the role has zero effect on this
+  // replay's fingerprint.
   walkTo(21, 14);
   for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter-elite1' });
 

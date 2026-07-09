@@ -57,6 +57,22 @@ const BURN_STATUS_TICKS = 4;   // residual burning duration after leaving flame
 const RESIDUAL_BURN_DMG = 1;
 const CHARGE_LIGHT_TTL = 2;    // world-ticks of no CHARGE command before the charge-light is cleaned up
 
+// Flash bottle tuning: a role variant of the same thrown-weapon mechanic
+// (content.js's per-instance `role: 'flashbang'`) — travels exactly like a
+// molotov, but landing doesn't ignite anything. Instead it ARMS: a genuinely
+// pending, not-yet-detonated sim state for FLASH_ARM_TICKS (6 ticks x 500ms
+// = 3s — "it can't explode instantly, it should beep and blink for 3 seconds
+// before exploding") — the same honest-telegraph discipline as
+// ENEMY_SPAWN_DELAY_TICKS above: the detonation genuinely hasn't happened
+// yet, not a renderer-only delay layered over an already-real effect.
+// Detonation itself is ONE discrete authoritative event (`flash_detonated`,
+// carrying a 0-100 `intensity` from proximity at the moment it goes off) —
+// the actual screen-whiteout decay over real wall-clock time is a
+// presentation-only cosmetic (src/app/game.js + src/app/flash-decay.js),
+// same split as the aura-fade/ping-ring effects already use.
+const FLASH_ARM_TICKS = 6;
+const FLASH_MAX_DIST = 8; // chebyshev distance past which a flash is fully spent (intensity 0)
+
 export function reduce(state, command) {
   const events = reduceCore(state, command);
   arcObserve(state, events);
@@ -112,21 +128,42 @@ function reduceCore(state, command) {
         delete state.light.sources['player-charge'];
       }
 
-      // Bottle advance: land (ignite target + fire an event) or update its
-      // in-flight light position. A bottle created earlier THIS tick by
-      // ai.js has elapsed=0, so it gets a light source immediately — no
-      // special-casing needed for brand-new throws.
+      // Bottle advance: land (ignite target, or ARM if it's a flash bottle)
+      // or update its in-flight light position. A bottle created earlier
+      // THIS tick by ai.js has elapsed=0, so it gets a light source
+      // immediately — no special-casing needed for brand-new throws.
       for (const bid of Object.keys(state.hazards.bottles).sort()) {
         const b = state.hazards.bottles[bid];
+        // Armed flash bottles skip the travel math entirely — they already
+        // landed a prior tick and are just counting down to detonation.
+        if (b.armed) {
+          b.armTicks -= 1;
+          if (b.armTicks <= 0) {
+            delete state.hazards.bottles[bid];
+            delete state.light.sources[`bottle:${bid}`];
+            const d = dist(state.player, b);
+            const intensity = Math.max(0, Math.min(100, 100 - Math.round((d / FLASH_MAX_DIST) * 100)));
+            events.push({ type: 'flash_detonated', x: b.x, y: b.y, intensity });
+          } else {
+            state.light.sources[`bottle:${bid}`] = { x: b.x, y: b.y, radius: BOTTLE_LIGHT_RADIUS, strength: BOTTLE_LIGHT_STRENGTH };
+          }
+          continue;
+        }
         const elapsed = state.tick - b.startTick;
         if (elapsed >= b.travelTicks) {
-          delete state.hazards.bottles[bid];
-          delete state.light.sources[`bottle:${bid}`];
-          igniteAt(state, b.x1, b.y1);
-          const targetKey = `${b.x1},${b.y1}`;
-          const ignited = !isWater(state, b.x1, b.y1)
-            && !Object.prototype.hasOwnProperty.call(state.region.blocked, targetKey);
-          events.push({ type: 'bottle_landed', x: b.x1, y: b.y1, ignited });
+          if (b.kind === 'flash') {
+            state.hazards.bottles[bid] = { x: b.x1, y: b.y1, kind: 'flash', armed: true, armTicks: FLASH_ARM_TICKS };
+            state.light.sources[`bottle:${bid}`] = { x: b.x1, y: b.y1, radius: BOTTLE_LIGHT_RADIUS, strength: BOTTLE_LIGHT_STRENGTH };
+            events.push({ type: 'bottle_landed', x: b.x1, y: b.y1, ignited: false, armed: true });
+          } else {
+            delete state.hazards.bottles[bid];
+            delete state.light.sources[`bottle:${bid}`];
+            igniteAt(state, b.x1, b.y1);
+            const targetKey = `${b.x1},${b.y1}`;
+            const ignited = !isWater(state, b.x1, b.y1)
+              && !Object.prototype.hasOwnProperty.call(state.region.blocked, targetKey);
+            events.push({ type: 'bottle_landed', x: b.x1, y: b.y1, ignited });
+          }
         } else {
           const t = elapsed / b.travelTicks;
           const bx = Math.round(b.x0 + (b.x1 - b.x0) * t);

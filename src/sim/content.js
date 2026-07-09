@@ -66,6 +66,14 @@ export const CONTENT = {
   // perception level, the deliberate one-shot-boss exception.
   enemyKinds: {
     answerer: { name: 'The Answerer', hp: 46, power: 5, senseReq: 3, aiSenseReq: 4, aggro: 4, hearing: 14, leash: 99, patrolRadius: 0 },
+    // Familiar faces from the earlier crossings, brought back for exactly one
+    // job: the player's FIRST enemy quest teaches the pulse/echo system on a
+    // kind they've already got some muscle memory for, before the Igniter's
+    // hide-and-seek machine (a wholly different way of playing) shows up.
+    // Standard chase/attack/return/search machine, unchanged from their
+    // original stats.
+    lurker: { name: 'Lurker', hp: 10, power: 2, senseReq: 1, aiSenseReq: 3, aggro: 2, hearing: 6, leash: 7, patrolRadius: 3, confidenceGated: true },
+    shell: { name: 'Shell', hp: 13, power: 2, senseReq: 1, aiSenseReq: 3, immune: 'aura', aggro: 2, hearing: 4, leash: 6, patrolRadius: 2, confidenceGated: true },
     // The only roaming creature in the reach — a hide-and-seek predator/prey,
     // not a fighter. `lightAverse` routes it to a wholly separate decision
     // function (src/sim/ai.js's decideLightAverseAction) that ignores the
@@ -89,11 +97,17 @@ export const CONTENT = {
     //   - `harmless`: never melee-strikes the player even if cornered
     //     (game.js's real-time proximity auto-attack skips this kind) — it
     //     only ever hurts you at range, with fire, defensively.
+    //   - a per-INSTANCE `role: 'flashbang'` (set on the enemy placement in a
+    //     region's `enemies`, not here on the kind) swaps what it throws —
+    //     see ai.js's decideLightAverseAction — from a molotov to a flash
+    //     bottle (armed 3s, then a proximity-scaled screen whiteout instead
+    //     of fire) without needing a whole separate content kind for one
+    //     behavioral variant of the same creature.
     igniter: {
       name: 'Igniter', hp: 11, power: 1, senseReq: 2, aiSenseReq: 3,
       aggro: 4, keepAway: 3, hearing: 6, leash: 6, patrolRadius: 2,
       confidenceGated: true, lightAverse: true, harmless: true,
-      throwRange: 6, throwCooldownTicks: 5,
+      throwRange: 3, throwCooldownTicks: 14,
     },
   },
 
@@ -145,15 +159,21 @@ export const CONTENT = {
           ],
         },
       },
-      // Four named Igniter instances, one per hunt quest, all existence-gated
-      // the same way as every other quest-tied kill target (see reduce.js
-      // ACCEPT_QUEST / world.js gatedEnemyIds) — none of them exist in a
-      // fresh world, so a free-roam kill can never soft-lock a quest.
+      // One instance per hunt quest, all existence-gated the same way as
+      // every other quest-tied kill target (see reduce.js ACCEPT_QUEST /
+      // world.js gatedEnemyIds) — none of them exist in a fresh world, so a
+      // free-roam kill can never soft-lock a quest. The first hunt uses
+      // familiar kinds (Lurker/Shell) so the player learns the pulse/echo
+      // system on something they've already got a read on; only the LATER
+      // hunts introduce the Igniter's hide-and-seek machine. igniter-elite1
+      // carries `role: 'flashbang'` (see content.js's igniter kind comment
+      // and ai.js) — the finale encounter escalates from "throws fire" to
+      // "throws a blinding flash", not just a bigger health bar.
       enemies: {
-        igniter1: { kind: 'igniter', x: 13, y: 19 }, // learn-to-listen
-        igniter2: { kind: 'igniter', x: 21, y: 15 }, // the-fleeing-kind
-        igniter3: { kind: 'igniter', x: 26, y: 7 },  // the-burning-kind
-        'igniter-elite1': { kind: 'igniter', x: 21, y: 14 }, // sound-the-deep finale prep
+        lurker1: { kind: 'lurker', x: 13, y: 19 },       // learn-to-listen
+        shell1: { kind: 'shell', x: 21, y: 15 },          // the-fleeing-kind
+        igniter1: { kind: 'igniter', x: 26, y: 7 },       // the-burning-kind
+        'igniter-elite1': { kind: 'igniter', x: 21, y: 14, role: 'flashbang' }, // sound-the-deep finale
       },
       destructibles: {
         cache1: { x: 14, y: 4, coins: 3 },
@@ -176,23 +196,17 @@ export const CONTENT = {
         drifter1: { x: 2, y: 10, dir: 'E' },
         drifter2: { x: 16, y: 3, dir: 'S' },
       },
-      // Fixed, ever-on light sources (src/sim/light.js) — bioluminescent
-      // vents, small pools of safety/orientation in an otherwise pulse-lit
-      // dark. Never move, never gated — atmosphere and a light-gem proving
-      // ground that exists before any dynamic source (fire, a lit bottle,
-      // the charged aura) does. radius/strength are both small deliberately:
-      // this is a dim pool, not a flood — echo stays the primary way to see.
-      lightSources: {
-        vent1: { x: 11, y: 6, radius: 3, strength: 55 },
-        vent2: { x: 11, y: 15, radius: 3, strength: 55 },
-      },
+      // No fixed, ever-on light sources this phase (an earlier vent pair was
+      // removed — always-lit ground served no gameplay purpose and read as
+      // an immersion break in a game built entirely around earning light).
       // Torches: unlit fixtures the player ignites (INTERACT range 1 — see
-      // reduce.js's LIGHT_TORCH case), permanent once lit. Bigger than a vent
+      // reduce.js's LIGHT_TORCH case), permanent once lit. Fairly strong
       // (radius/strength) since their whole purpose is shrinking an
       // Igniter's viable dark ground during a hunt — see ai.js's
-      // LIGHT_IDLE_THRESHOLD, which reads this same field. One near each of
-      // the two branch-hunt Igniters (igniter2/igniter3) so lighting one is
-      // a real, useful tactic, not just atmosphere.
+      // LIGHT_IDLE_THRESHOLD, which reads this same field. One near shell1
+      // (the-fleeing-kind) and one near igniter1 (the-burning-kind, the
+      // player's first real Igniter hunt) so lighting one is a real, useful
+      // tactic, not just atmosphere.
       torches: {
         torch1: { x: 19, y: 15, radius: 4, strength: 65 },
         torch2: { x: 23, y: 8, radius: 4, strength: 65 },
@@ -255,13 +269,13 @@ export const CONTENT = {
       // roles on separate NPCs sidesteps it entirely (game 3's #E3 lesson).
       giver: 'wren',
       requires: ['into-the-dark'],
-      objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
+      objectives: [{ type: 'kill', target: 'lurker', n: 1 }],
       reward: { coins: 5 },
       // Existence-gated (not present until this quest is accepted) —
-      // igniter1 is the only free Igniter, so leaving it free-roam let a
+      // lurker1 is the only free Lurker, so leaving it free-roam let a
       // player catch it before accepting this quest, permanently
       // soft-locking the objective.
-      unlocks: { enemies: ['igniter1'] },
+      unlocks: { enemies: ['lurker1'] },
     },
     // A real branch point, not a straight line: 'the-fleeing-kind' and
     // 'the-burning-kind' are both offered the moment 'learn-to-listen'
@@ -269,15 +283,15 @@ export const CONTENT = {
     // done (requiresAny — an OR prereq, see reduce.js's TALK case and
     // validate.js). The other stays available afterward (talk to Wren
     // again) for a player who wants both, but nothing gates progress on
-    // completing both. Both hunts are the same creature (there's only one
-    // kind now) — the branch is WHICH hunt you take, not which monster.
+    // completing both. 'the-fleeing-kind' keeps a second familiar kind
+    // (Shell); 'the-burning-kind' is the player's first real Igniter.
     'the-fleeing-kind': {
       name: 'The Fleeing Kind',
       giver: 'wren',
       requires: ['learn-to-listen'],
-      objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
+      objectives: [{ type: 'kill', target: 'shell', n: 1 }],
       reward: { coins: 5 },
-      unlocks: { enemies: ['igniter2'] },
+      unlocks: { enemies: ['shell1'] },
     },
     'the-burning-kind': {
       name: 'The Burning Kind',
@@ -285,7 +299,7 @@ export const CONTENT = {
       requires: ['learn-to-listen'],
       objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
       reward: { coins: 5 },
-      unlocks: { enemies: ['igniter3'] },
+      unlocks: { enemies: ['igniter1'] },
     },
     'the-sounding-line': {
       name: 'The Sounding Line',

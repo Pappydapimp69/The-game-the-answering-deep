@@ -23,10 +23,11 @@ import { bfsNextStep, stepAwayFrom } from '../src/sim/pathfind.js';
 import { hasLineOfSight } from '../src/sim/visibility.js';
 import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
-import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS, MAX_SPREAD_RADIUS } from '../src/sim/fire.js';
+import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS, GEN_MAX_CHILDREN } from '../src/sim/fire.js';
 import { ENEMY_SPRITES, NPC_SPRITES } from '../src/app/sprites.js';
+import { flashOpacity } from '../src/app/flash-decay.js';
 
-const GOLDEN_DEMO_FINGERPRINT = 'e0a3246a';
+const GOLDEN_DEMO_FINGERPRINT = '242df650';
 
 const failures = [];
 let count = 0;
@@ -117,6 +118,18 @@ test('every NPC has a mapped sprite (no silent recolored-player fallback)', () =
     }
   }
 });
+// Lurker/Shell were restored from git history (the commit that originally
+// removed them) rather than re-authored from memory, for speed and fidelity —
+// this pins their original stats so a transcription slip fails the build.
+test('restored Lurker/Shell kinds match their original stats exactly', () => {
+  const lurker = CONTENT.enemyKinds.lurker;
+  assertEqual(lurker.hp, 10); assertEqual(lurker.power, 2); assertEqual(lurker.aggro, 2);
+  assertEqual(lurker.hearing, 6); assertEqual(lurker.leash, 7); assertEqual(lurker.patrolRadius, 3);
+  assert(!lurker.immune, 'lurker should carry no immunity');
+  const shell = CONTENT.enemyKinds.shell;
+  assertEqual(shell.hp, 13); assertEqual(shell.power, 2); assertEqual(shell.immune, 'aura');
+  assertEqual(shell.aggro, 2); assertEqual(shell.hearing, 4); assertEqual(shell.leash, 6); assertEqual(shell.patrolRadius, 2);
+});
 test('deliberate content corruptions fail the build, not the player', () => {
   const corrupt = (mut) => { const c = structuredClone(CONTENT); mut(c); return validateContent(c).length > 0; };
   assert(corrupt((c) => { c.enemyKinds.igniter.aiSenseReq = 0; }), 'aiSenseReq below senseReq passed');
@@ -193,15 +206,16 @@ test('the finale is not offered until the sounding-line quest completes', () => 
 
 console.log('# quest chain: a real branch (requiresAny), not a straight line');
 // Tickless combat (moveAdjacent/MELEE never TICKs) keeps a light-averse
-// Igniter parked at its spawn throughout — same trick the demo uses.
+// Igniter parked at its spawn throughout — same trick the demo uses. Lurker
+// and Shell (standard chase/attack machine) never move off-script either way.
 test('completing learn-to-listen offers BOTH the-fleeing-kind and the-burning-kind at once', () => {
   const w = makeWorld(1);
   talkAndAccept(w, 'wren', 'into-the-dark');
   moveAdjacent(w, { x: 20, y: 10 });
   talkAndAccept(w, 'wren', 'learn-to-listen');
-  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.igniter1);
-  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
   moveAdjacent(w, w.npcs.wren);
   const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
   const offered = ev.find((e) => e.type === 'quests_offered');
@@ -212,16 +226,17 @@ test('the-sounding-line is offered once EITHER branch completes, not requiring b
   talkAndAccept(w, 'wren', 'into-the-dark');
   moveAdjacent(w, { x: 20, y: 10 });
   talkAndAccept(w, 'wren', 'learn-to-listen');
-  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.igniter1);
-  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
   // Take the-burning-kind branch (NOT the-fleeing-kind) and confirm that
-  // alone is sufficient — the-fleeing-kind is never touched in this test.
+  // alone is sufficient — the-fleeing-kind (and shell1) is never touched in
+  // this test.
   talkAndAccept(w, 'wren', 'the-burning-kind');
   assert(!w.quests.completed['the-fleeing-kind'], 'the-fleeing-kind should never have been accepted, let alone completed');
-  g = 0; while (!w.enemies.igniter3 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.igniter3);
-  for (let i = 0; i < 8; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter3' });
+  g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.igniter1);
+  for (let i = 0; i < 8; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
   assert(w.quests.completed['the-burning-kind'], 'the-burning-kind never completed');
   moveAdjacent(w, w.npcs.wren);
   const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
@@ -235,11 +250,11 @@ test('igniter-elite1/chorusshard1 do not exist before the finale quest is accept
   assert(!fresh.enemies['igniter-elite1'], 'gated enemy pre-spawned');
   assert(!fresh.pickups.chorusshard1, 'gated pickup pre-spawned');
 });
-test('igniter1/igniter2/igniter3/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
+test('lurker1/shell1/igniter1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
   const fresh = makeWorld(1);
-  assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before learn-to-listen is accepted');
-  assert(!fresh.enemies.igniter2, 'igniter2 pre-spawned — killable before the-fleeing-kind is accepted');
-  assert(!fresh.enemies.igniter3, 'igniter3 pre-spawned — killable before the-burning-kind is accepted');
+  assert(!fresh.enemies.lurker1, 'lurker1 pre-spawned — killable before learn-to-listen is accepted');
+  assert(!fresh.enemies.shell1, 'shell1 pre-spawned — killable before the-fleeing-kind is accepted');
+  assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before the-burning-kind is accepted');
   assert(!fresh.pickups.soundingline1, 'soundingline1 pre-spawned — collectable before the-sounding-line is accepted');
 });
 test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not instant-spawn', () => {
@@ -249,11 +264,16 @@ test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not ins
   moveAdjacent(w, w.npcs.wren);
   reduce(w, { type: 'TALK', npcId: 'wren' });
   const ev = reduce(w, { type: 'ACCEPT_QUEST', questId: 'learn-to-listen' });
-  assert(!w.enemies.igniter1, 'igniter1 spawned instantly on ACCEPT_QUEST instead of telegraphing');
-  assert(w.pendingSpawns.some((p) => p.id === 'igniter1'), 'igniter1 not queued in pendingSpawns');
-  assert(ev.some((e) => e.type === 'enemy_incoming' && e.target === 'igniter1'), 'no enemy_incoming event fired');
-  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
-  assert(w.enemies.igniter1 && w.enemies.igniter1.alive === 1, 'igniter1 never actually appeared after its delay');
+  assert(!w.enemies.lurker1, 'lurker1 spawned instantly on ACCEPT_QUEST instead of telegraphing');
+  assert(w.pendingSpawns.some((p) => p.id === 'lurker1'), 'lurker1 not queued in pendingSpawns');
+  assert(ev.some((e) => e.type === 'enemy_incoming' && e.target === 'lurker1'), 'no enemy_incoming event fired');
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  assert(w.enemies.lurker1 && w.enemies.lurker1.alive === 1, 'lurker1 never actually appeared after its delay');
+});
+test('igniter-elite1 (finale) carries role: flashbang', () => {
+  const w = makeWorld(1);
+  assertEqual(w.quests.defs['sound-the-deep'].unlocks.enemies['igniter-elite1'].role, 'flashbang',
+    'igniter-elite1 lost its flashbang role in the quest-def snapshot');
 });
 
 // Regular enemies are quest-gated now — don't exist off a bare makeWorld().
@@ -569,8 +589,8 @@ test('stepFire is deterministic: same seed + same starting fire => identical fir
 });
 test('a fire tile\'s fuel eventually reaches 0 and it is removed', () => {
   const w = makeWorld(1);
-  // Surround on all 4 sides so it cannot spread — purely testing decay.
-  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100 };
+  // Surround on all 8 sides (fire spreads diagonally too) so it cannot spread — purely testing decay.
+  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100, '7,5': 100, '9,5': 100, '7,7': 100, '9,7': 100 };
   igniteAt(w, 8, 6);
   assert(w.hazards.fire['8,6'], 'ignition failed');
   for (let i = 0; i < FIRE_FUEL_TICKS; i++) stepFire(w);
@@ -583,18 +603,52 @@ test('fire never spreads onto or persists on a water/road tile', () => {
   for (let i = 0; i < 30; i++) stepFire(w);
   assert(!w.hazards.fire['16,6'], 'fire spread onto a road/water tile');
 });
-test('fire never spreads past MAX_SPREAD_RADIUS from where it started, however long it burns', () => {
+test('a fresh root ignition gets generation 0 and the full gen0 spawn budget; a spread child gets its OWN generation budget, not the parent\'s', () => {
+  const w = makeWorld(1);
+  igniteAt(w, 8, 6);
+  assertEqual(w.hazards.fire['8,6'].generation, 0, 'a fresh root ignition should be generation 0');
+  assertEqual(w.hazards.fire['8,6'].spawnsLeft, GEN_MAX_CHILDREN[0], 'a fresh root ignition should start with the full gen0 spawn budget');
+  igniteAt(w, 9, 6, 1); // simulate a gen1 spread ignition directly
+  assertEqual(w.hazards.fire['9,6'].generation, 1);
+  assertEqual(w.hazards.fire['9,6'].spawnsLeft, GEN_MAX_CHILDREN[1], 'a gen1 tile should get its own (smaller) budget, not inherit gen0\'s');
+  igniteAt(w, 10, 6, 2); // simulate a gen2 spread ignition — the last generation allowed to exist
+  assertEqual(w.hazards.fire['10,6'].generation, 2);
+  assertEqual(w.hazards.fire['10,6'].spawnsLeft, 0, 'gen2 (and beyond) must have zero spawn budget — "those last fire objects can\'t spawn any new fire objects"');
+});
+test('fire ALWAYS fully extinguishes, even though a burnt-out tile can be relit by a still-lit neighbor (the generation budget bounds total ignitions, a radius alone did not)', () => {
   const w = makeWorld(1);
   const ox = 8, oy = 6; // open floor, well clear of any structure/road
   igniteAt(w, ox, oy);
-  // Run far longer than any single tile's fuel could last, so this is
-  // exercising the whole life of a chain of spread ignitions, not just one.
-  for (let i = 0; i < 40; i++) stepFire(w);
-  for (const key of Object.keys(w.hazards.fire)) {
-    const [x, y] = key.split(',').map(Number);
-    const dist = Math.max(Math.abs(x - ox), Math.abs(y - oy));
-    assert(dist <= MAX_SPREAD_RADIUS, `fire tile ${key} is ${dist} tiles from its origin, past MAX_SPREAD_RADIUS(${MAX_SPREAD_RADIUS})`);
+  // The old radius-only model let a burnt-out tile get relit by a still-lit
+  // neighbor sharing the same radius forever (the exact bug reported live —
+  // "it looks like a real fire... but then those newly lit tiles relight the
+  // old tile again so it burns forever"). The generation-capped spawn budget
+  // fixes this structurally: total ignition EVENTS across the whole blaze is
+  // capped at 1 + GEN_MAX_CHILDREN[0] + GEN_MAX_CHILDREN[0]*GEN_MAX_CHILDREN[1],
+  // so it MUST run dry well within a small, bounded number of ticks — no
+  // matter how favorable the spread rolls are.
+  const maxTicks = 30;
+  let guard = 0;
+  while (Object.keys(w.hazards.fire).length > 0 && guard++ < maxTicks) stepFire(w);
+  assertEqual(Object.keys(w.hazards.fire).length, 0, `fire did not fully extinguish within ${maxTicks} ticks — a re-ignition ping-pong is likely sustaining it`);
+});
+test('fire spread includes diagonals (8-directional), not just N/E/S/W', () => {
+  const w = makeWorld(1);
+  const ox = 8, oy = 6; // open floor, well clear of any structure/road
+  // Block all 4 cardinal neighbors, leaving only the 4 diagonals open — if
+  // spread were still 4-directional (the old model) it could never reach
+  // ANY neighbor here at all.
+  w.region.blocked = {
+    ...w.region.blocked,
+    [`${ox},${oy - 1}`]: 100, [`${ox + 1},${oy}`]: 100, [`${ox},${oy + 1}`]: 100, [`${ox - 1},${oy}`]: 100,
+  };
+  igniteAt(w, ox, oy);
+  let spread = false;
+  for (let i = 0; i < FIRE_FUEL_TICKS && !spread; i++) {
+    stepFire(w);
+    spread = Object.keys(w.hazards.fire).some((key) => key !== `${ox},${oy}`);
   }
+  assert(spread, 'fire never spread to a diagonal-only-open neighbor — SPREAD_DIRS may have regressed to 4-directional');
 });
 test('a fire tile burns out on its own in FIRE_FUEL_TICKS regardless of spread elsewhere', () => {
   const w = makeWorld(1);
@@ -621,7 +675,7 @@ test('a light-averse enemy caught close by a fresh reveal throws once, then flee
   const w = makeWorld(1);
   const e = makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
   const kind = CONTENT.enemyKinds.igniter;
-  w.player.x = e.x + 3; w.player.y = e.y; // within throwRange(6), not adjacent
+  w.player.x = e.x + 3; w.player.y = e.y; // within throwRange(3) — right at the boundary, not adjacent
   chargeTo(w, 3);
   reduce(w, { type: 'PING', loud: true }); // reveals it (echo.lit) — the detection event
   assertEqual(Object.keys(w.hazards.bottles).length, 0, 'a bottle already existed before any TICK');
@@ -630,10 +684,25 @@ test('a light-averse enemy caught close by a fresh reveal throws once, then flee
   assertEqual(Object.keys(w.hazards.bottles).length, 1, 'a close, newly-revealed igniter did not throw exactly one bottle');
   assertEqual(w.enemies.testigniter.throwCooldown, kind.throwCooldownTicks, 'throwCooldown not set to the full cooldown after throwing');
 });
+test('an igniter just outside its (tuned) throwRange never throws', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
+  const kind = CONTENT.enemyKinds.igniter;
+  w.player.x = e.x + kind.throwRange + 1; w.player.y = e.y; // one tile past throwRange
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'flee', 'a revealed igniter should still flee even without a throw');
+  assertEqual(Object.keys(w.hazards.bottles).length, 0, 'an igniter threw from just beyond its own throwRange');
+});
+test('Igniter throwRange/throwCooldownTicks are tuned to 3 tiles / 14 ticks (7s at 500ms/tick)', () => {
+  assertEqual(CONTENT.enemyKinds.igniter.throwRange, 3, 'Igniter throwRange drifted from its tuned value');
+  assertEqual(CONTENT.enemyKinds.igniter.throwCooldownTicks, 14, 'Igniter throwCooldownTicks drifted from its tuned value');
+});
 test('an igniter revealed while already far away just flees — no throw', () => {
   const w = makeWorld(1);
   makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
-  w.player.x = 8; w.player.y = 13; // chebyshev 7, past throwRange(6)
+  w.player.x = 8; w.player.y = 13; // chebyshev 7, well past throwRange(3)
   chargeTo(w, 3);
   reduce(w, { type: 'PING', loud: true });
   reduce(w, { type: 'TICK' });
@@ -667,6 +736,83 @@ test('a landed bottle ignites its target tile; a bottle landing on water does no
   assert(!w2.hazards.fire['16,6'], 'a bottle landing on a water/road tile ignited it');
 });
 
+console.log('# flashbang role: armed telegraph, detonation, proximity intensity');
+test('a flashbang-role igniter throws a flash bottle, not a molotov', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testflash', 'igniter', 8, 6, { role: 'flashbang' });
+  w.player.x = e.x + 2; w.player.y = e.y; // within throwRange(3), not adjacent
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  const bottles = Object.values(w.hazards.bottles);
+  assertEqual(bottles.length, 1, 'a close, newly-revealed flashbang igniter did not throw exactly one bottle');
+  assertEqual(bottles[0].kind, 'flash', 'a flashbang-role igniter threw a molotov instead of a flash bottle');
+});
+test('a plain igniter (no role) still throws an ordinary molotov', () => {
+  const w = makeWorld(1);
+  makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
+  w.player.x = 10; w.player.y = 6;
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  const bottles = Object.values(w.hazards.bottles);
+  assertEqual(bottles.length, 1, 'no bottle thrown');
+  assertEqual(bottles[0].kind, 'molotov', 'a roleless igniter threw something other than a molotov');
+});
+test('a flash bottle lands and ARMS instead of igniting (a real, honest 3s telegraph, not a renderer-only delay)', () => {
+  const w = makeWorld(1);
+  w.hazards.bottles.testflash = { x0: 8, y0: 6, x1: 8, y1: 7, startTick: w.tick, travelTicks: 1, kind: 'flash' };
+  const ev = reduce(w, { type: 'TICK' }); // elapsed 1 >= travelTicks 1 — lands
+  assert(!w.hazards.fire['8,7'], 'a flash bottle ignited fire on landing');
+  assert(w.hazards.bottles.testflash && w.hazards.bottles.testflash.armed, 'a landed flash bottle did not arm');
+  assert(ev.some((e) => e.type === 'bottle_landed' && e.armed), 'no armed bottle_landed event fired on landing');
+});
+test('an armed flash bottle detonates after its arm window, at full intensity point-blank', () => {
+  const w = makeWorld(1);
+  w.hazards.bottles.testflash = { x: 8, y: 7, kind: 'flash', armed: true, armTicks: 2 };
+  w.player.x = 8; w.player.y = 7; // standing right where it lands — max intensity
+  let detonated = null;
+  for (let i = 0; i < 5 && !detonated; i++) {
+    const evs = reduce(w, { type: 'TICK' });
+    detonated = evs.find((e) => e.type === 'flash_detonated');
+  }
+  assert(detonated, 'an armed flash bottle never detonated');
+  assertEqual(detonated.intensity, 100, 'a point-blank detonation should be full (100) intensity');
+  assert(!w.hazards.bottles.testflash, 'a detonated flash bottle was not removed from state.hazards.bottles');
+});
+test('flash intensity fades with distance from the detonation point', () => {
+  const w = makeWorld(1);
+  w.hazards.bottles.testflash = { x: 8, y: 6, kind: 'flash', armed: true, armTicks: 1 };
+  w.player.x = 16; w.player.y = 6; // far away
+  const evs = reduce(w, { type: 'TICK' });
+  const det = evs.find((e) => e.type === 'flash_detonated');
+  assert(det, 'a flash bottle never detonated');
+  assert(det.intensity < 100 && det.intensity >= 0, 'a distant detonation should be scaled down, not full or negative intensity');
+});
+
+console.log('# flash-decay curve (presentation-only cosmetic, src/app/flash-decay.js)');
+test('flashOpacity decays monotonically to 0 and never leaves the 0-100 range', () => {
+  let prev = 100;
+  for (let ms = 0; ms <= 8000; ms += 100) {
+    const v = flashOpacity(100, ms);
+    assert(v <= prev + 0.0001, 'flash opacity increased over time');
+    assert(v >= 0 && v <= 100, 'flash opacity left the 0-100 range');
+    prev = v;
+  }
+  assertEqual(flashOpacity(100, 8000), 0, 'flash opacity never fully reaches 0');
+});
+test('flashOpacity decays faster in the 20-100 band than the 0-20 band (reversed charge-ramp shape)', () => {
+  // Time to fall from 100 to 60 (entirely inside the fast band) should be much
+  // shorter than the time to fall an equal 40 points starting from 20 down to
+  // ~-20 territory (clamped at 0) — i.e. the slow band takes far longer per
+  // point of decay than the fast band.
+  let tFastSpan = 0;
+  while (flashOpacity(100, tFastSpan) > 60) tFastSpan += 10;
+  let tSlowSpan = 0;
+  while (flashOpacity(20, tSlowSpan) > 0) tSlowSpan += 10;
+  assert(tSlowSpan > tFastSpan, 'the 0-20 band did not decay slower (take longer) than the 20-100 band');
+});
+
 console.log('# player burn: catching fire, residual burn, extinguishing');
 test('standing in fire damages the player each tick and sets onFireTicks', () => {
   const w = makeWorld(1);
@@ -680,11 +826,11 @@ test('standing in fire damages the player each tick and sets onFireTicks', () =>
 test('after leaving the fire, smaller residual damage continues for a bounded window then stops', () => {
   const w = makeWorld(1);
   w.player.x = 8; w.player.y = 6;
-  // Wall off all 4 neighbors so this fire tile can never spread — isolates
+  // Wall off all 8 neighbors (fire spreads diagonally too) so this fire tile can never spread — isolates
   // the test from the cellular automaton entirely (same technique as the
   // fuel-decay test above), so it can only ever measure the RESIDUAL-burn
   // timer, never an unrelated re-ignition reaching the player's new tile.
-  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100 };
+  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100, '7,5': 100, '9,5': 100, '7,7': 100, '9,7': 100 };
   igniteAt(w, 8, 6);
   reduce(w, { type: 'TICK' }); // catches fire
   assert(w.player.onFireTicks > 0, 'player never caught fire');

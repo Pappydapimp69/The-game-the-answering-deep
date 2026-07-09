@@ -178,9 +178,13 @@ function decideLightAverseAction(state, id, e, kind, player, distToPlayer, distF
     if (e.aiState !== 'flee' && distToPlayer > 1 && distToPlayer <= kind.throwRange && e.throwCooldown === 0) {
       const bottleId = `bottle_${id}_${state.tick}`;
       const travelTicks = Math.max(1, Math.ceil(distToPlayer / 2));
+      // `role: 'flashbang'` (a per-INSTANCE field, see content.js) swaps what
+      // lands: a flash bottle arms instead of igniting (reduce.js's TICK
+      // case), same travel physics either way.
       state.hazards.bottles[bottleId] = {
         x0: e.x, y0: e.y, x1: player.x, y1: player.y,
         startTick: state.tick, travelTicks,
+        kind: e.role === 'flashbang' ? 'flash' : 'molotov',
       };
       e.throwCooldown = kind.throwCooldownTicks;
     }

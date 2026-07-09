@@ -18,7 +18,13 @@ import { recomputeLight } from './light.js';
 // now, but reading it as falsy would wrongly re-blind them — route to New
 // Game instead of a false start-of-game readout).
 // .4: added state.torches (player-lit permanent fixtures).
-export const WORLD_VERSION = 'answeringdeep4.4';
+// .5: added enemy.role (per-instance behavior variant, e.g. flashbang);
+// fire tiles now carry {generation, spawnsLeft} instead of {origin}; bottles
+// carry a `kind` ('molotov'/'flash') and flash bottles gain an `armed`/
+// `armTicks` sub-shape once landed — an old save's enemies/hazards would
+// silently behave wrong (never re-spread fire, never arm a flash) rather
+// than crash, which is exactly the case this version bump exists to catch.
+export const WORLD_VERSION = 'answeringdeep4.5';
 
 export function makeWorld(seed, options = {}) {
   if (!Number.isInteger(seed)) throw new Error('makeWorld: seed must be an integer');
@@ -182,11 +188,12 @@ export function makeWorld(seed, options = {}) {
     },
   };
 
-  // Seed this region's fixed ambient light sources (bioluminescent vents —
-  // content-authored, never move) and compute the initial field once. Any
-  // FUTURE dynamic source (a lit thrown bottle, a burning tile, the player's
-  // own charged aura) is added/removed by reduce.js, which recomputes the
-  // field the same way — this is just construction time's version of that.
+  // Seed this region's fixed ambient light sources (content-authored, never
+  // move — none currently defined; this phase has no always-on ground) and
+  // compute the initial field once. Any FUTURE dynamic source (a lit thrown
+  // bottle, a burning tile, the player's own charged aura) is added/removed
+  // by reduce.js, which recomputes the field the same way — this is just
+  // construction time's version of that.
   for (const [id, ls] of Object.entries(regionDef.lightSources || {})) {
     state.light.sources[id] = { x: ls.x, y: ls.y, radius: ls.radius, strength: ls.strength };
   }
@@ -225,5 +232,9 @@ function makeEnemy(id, e) {
     // dead weight for every other kind, kept uniform so makeEnemy() doesn't
     // need a kind-conditional shape.
     throwCooldown: 0,
+    // Per-INSTANCE behavioral variant (content.js's per-enemy `role`, not a
+    // per-kind field) — e.g. 'flashbang' makes a lightAverse thrower lob a
+    // flash bottle instead of a molotov (ai.js). '' for every ordinary enemy.
+    role: e.role || '',
   };
 }

@@ -126,15 +126,47 @@ export const NPC_SPRITES = {
 };
 
 // One distinct silhouette per enemy kind, 10x10. The Drowned Reach's dangers
-// read as things of the deep — never armored soldiers (that was the Waiting
-// City's civic-guard reg). Only two kinds now: the boss, and the Igniter.
+// read as things of the deep — barnacled, shelled, or bioluminescent — never
+// armored soldiers (that was the Waiting City's civic-guard reg). Lurker and
+// Shell are the two familiar faces reintroduced for the first hunt quests
+// (see content.js) — same original silhouettes, standing chase/attack kinds,
+// there to teach the pulse/echo system before the Igniter's hide-and-seek
+// machine is the whole game.
 const ENEMY_PALETTE = {
+  t: '#5c7a82', u: '#3f5a62', k: '#243638', // lurker: barnacled slate-teal
+  q: '#6a3f5a', j: '#42283a', p: '#241420', // shell: shelled plum-violet
   W: '#bfe8e0', V: '#6fd0c0', N: '#0a2a26', // the Answerer: pale bioluminescent
   f: '#ff8f3d', g: '#8a2e1a', h: '#241a14', // igniter: soot-hooded, ember-lit
 };
 function esprite(key, rows) { return { key, rows, palette: ENEMY_PALETTE }; }
 
 export const ENEMY_SPRITES = {
+  // Lurker: a hunched, barnacle-crusted shape — low, wide, close to the floor.
+  lurker: esprite('e-lurker', [
+    '..........',
+    '...tttt...',
+    '..tuuuut..',
+    '.tukEEkut.',
+    '.tuukkuut.',
+    'ttukkkkutt',
+    'tkkkkkkkkt',
+    '.kk.kk.kk.',
+    '..k....k..',
+    '..........',
+  ]),
+  // Shell: a squat, thick-plated carapace — the immune-to-aura bulk.
+  shell: esprite('e-shell', [
+    '..qqqqqq..',
+    '.qjjjjjjq.',
+    'qjjppppjjq',
+    'qjppEEppjq',
+    'qjppppppjq',
+    'qjppppppjq',
+    '.qjppppjq.',
+    '..qjppjq..',
+    '..jp..pj..',
+    '..........',
+  ]),
   // The Answerer: pale, coral/bone-ridged, a glowing throat where a mouth
   // would be — the voice it stole is the one bright thing on it.
   answerer: esprite('e-answerer', [
@@ -215,4 +247,30 @@ export const TORCH_SPRITES = {
     rows: ['..gg....', '.gffg...', '..oo....', '.oooo...', '..oo....', '..oo....', '..oo....', '........'],
     palette: TORCH_PALETTE,
   },
+};
+
+// Thrown-attack projectiles (src/sim/reduce.js's state.hazards.bottles,
+// renderer.js draws these in flight/landed) — each kind of throw reads as
+// its own object, not a shared colored dot: a molotov is glass-and-flame
+// (same warm palette family as the Igniter's own fire), a flash bottle is a
+// dull grey canister that only lights up while `armed` (renderer alternates
+// primed/blank on a fixed real-time interval for the "beeps and blinks"
+// telegraph — cosmetic only; the actual 3-second arm window is real sim
+// state, see reduce.js's FLASH_ARM_TICKS).
+const MOLOTOV_PALETTE = { g: '#8a2e1a', f: '#ff8f3d', k: '#3a2818' };
+export const MOLOTOV_SPRITE = {
+  key: 'proj-molotov',
+  rows: ['..f.....', '.ff.....', '.kg.....', '.kgg....', 'kgggg...', 'kgggg...', '.kgg....', '........'],
+  palette: MOLOTOV_PALETTE,
+};
+const FLASHBANG_PALETTE = { c: '#7c8a96', d: '#4a545c', y: '#ffe98a' };
+export const FLASHBANG_SPRITE = {
+  key: 'proj-flashbang',
+  rows: ['........', '.cccc...', 'cdddc...', 'cdddc...', 'cdddc...', 'cdddc...', '.cccc...', '........'],
+  palette: FLASHBANG_PALETTE,
+};
+export const FLASHBANG_ARMED_SPRITE = {
+  key: 'proj-flashbang-armed',
+  rows: ['..y.....', '.cyyc...', 'cdydc...', 'cdydc...', 'cdydc...', 'cdydc...', '.cccc...', '........'],
+  palette: FLASHBANG_PALETTE,
 };
