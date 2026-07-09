@@ -6,7 +6,7 @@
 // Buildings are NOT drawn through this system — a multi-tile rectangular
 // facade doesn't fit pixelart's fixed square blit, so renderer.js draws them
 // procedurally (fillRect + a window grid) instead. This file covers the
-// player, enemies, cars, and 1-tile ground/road variants only.
+// player, NPCs, enemies, drifters, and 1-tile ground/current variants only.
 
 const PLAYER_PALETTE = {
   H: '#3c2a5e', h: '#6b4fa0', // hair (dark / highlight violet)
@@ -71,73 +71,134 @@ export const BLAST_SPRITE = {
   palette: { C: '#dff3ff', B: '#3fa9f5', b: '#1f6fae' },
 };
 
-// One distinct silhouette per enemy kind, 10x10. City guards read as armored
-// figures (helmet + cloak), not amorphous blobs — this is a civic force, not
-// a monster roster.
+// NPCs: each gets its OWN silhouette + palette, not a shared/recolored player
+// sprite — Wren (a weathered survivor, coil of line at the hip) and Marrow
+// (a stockier trader, satchel of goods) should be tellable apart at a glance,
+// the same way the player is tellable from every enemy kind.
+const WREN_PALETTE = {
+  H: '#4a4238', h: '#6b6152', // hair (grey-brown, weathered)
+  S: '#c9a374', // skin, sun/salt-worn
+  O: '#2a3a42', o: '#1c282e', // coat (slate blue-grey)
+  A: '#8a6a3a', // the sounding-line coil, hip-slung
+  B: '#1a1614', E: '#14100c',
+};
+export const NPC_SPRITES = {
+  wren: {
+    key: 'npc-wren',
+    palette: WREN_PALETTE,
+    rows: [
+      '..H..hh..H..',
+      '.HHHhhhhHHH.',
+      '.HSSSSSSSSH.',
+      '.SSSESSESS..',
+      '.SSSSSSSSS..',
+      '.OOOOOOOOOO.',
+      'OOOOOOOOOOOO',
+      'OOOOOOAAOOOO',
+      '.OOOAAAOOO..',
+      '.BBB...BBB..',
+      '.BBB...BBB..',
+    ],
+  },
+  marrow: {
+    key: 'npc-marrow',
+    palette: {
+      H: '#241a10', h: '#3a2a1a',
+      S: '#a87858',
+      O: '#5c3a24', o: '#3e2717', // coat (warm brown, trader)
+      A: '#d9b23a', // satchel buckle / coin glint
+      B: '#1a1410', E: '#0e0a08',
+    },
+    rows: [
+      '.....HH.....',
+      '..HHHhhHHH..',
+      '.HSSSSSSSSH.',
+      '.SSSESSESS..',
+      '.SSSSSSSSS..',
+      'OOOOOOOOOOOO',
+      'OOOOOOOOOOOO',
+      'OAOOOOOOOOAO',
+      '.OOOOOOOOOO.',
+      '.BBBB..BBBB.',
+      '.BBBB..BBBB.',
+    ],
+  },
+};
+
+// One distinct silhouette per enemy kind, 10x10. The Drowned Reach's dangers
+// read as things of the deep — barnacled, shelled, finned, or bioluminescent
+// — never armored soldiers (that was the Waiting City's civic-guard reg).
 const ENEMY_PALETTE = {
-  t: '#8a97ab', u: '#5c6b82', k: '#39435a', // sentry: steel grey armor
-  q: '#7a5a3a', j: '#4a3722', p: '#2b2013', // bulwark: bronze/leather bulk
-  x: '#6a2f3f', y: '#3f1c26', // cutthroat: dark red cloak
-  W: '#caa23a', V: '#8a6a1e', N: '#241a08', // Warden: gold/black regalia
+  t: '#5c7a82', u: '#3f5a62', k: '#243638', // lurker: barnacled slate-teal
+  q: '#6a3f5a', j: '#42283a', p: '#241420', // shell: shelled plum-violet
+  x: '#3a8a7a', y: '#1f5c4f', // darter: quick fin-teal
+  W: '#bfe8e0', V: '#6fd0c0', N: '#0a2a26', // the Answerer: pale bioluminescent
 };
 function esprite(key, rows) { return { key, rows, palette: ENEMY_PALETTE }; }
 
 export const ENEMY_SPRITES = {
-  sentry: esprite('e-sentry', [
+  // Lurker: a hunched, barnacle-crusted shape — low, wide, close to the floor.
+  lurker: esprite('e-lurker', [
+    '..........',
     '...tttt...',
     '..tuuuut..',
-    '..tukkut..',
-    '.ttuuuutt.',
-    '.tkkkkkkt.',
-    '.tkkkkkkt.',
-    '..kkkkkk..',
-    '..kk..kk..',
-    '..kk..kk..',
+    '.tukEEkut.',
+    '.tuukkuut.',
+    'ttukkkkutt',
+    'tkkkkkkkkt',
+    '.kk.kk.kk.',
+    '..k....k..',
     '..........',
   ]),
-  bulwark: esprite('e-bulwark', [
+  // Shell: a squat, thick-plated carapace — the immune-to-aura bulk.
+  shell: esprite('e-shell', [
     '..qqqqqq..',
     '.qjjjjjjq.',
-    '.qjppppjq.',
-    'qjppppppjq',
+    'qjjppppjjq',
+    'qjppEEppjq',
     'qjppppppjq',
     'qjppppppjq',
     '.qjppppjq.',
     '..qjppjq..',
-    '..qj..jq..',
+    '..jp..pj..',
     '..........',
   ]),
-  cutthroat: esprite('e-cutthroat', [
+  // Darter: slender, finned, built to read as fast — the flee-at-low-hp kind.
+  darter: esprite('e-darter', [
+    '....xx....',
     '...xxxx...',
     '..xxxxxx..',
-    '.xxyxxyxx.',
-    '.xxxxxxxx.',
-    '..xxxxxx..',
-    '..xyxxyx..',
-    '..xy..yx..',
-    '...y..y...',
+    '.xxxEExxx.',
+    'yxxxxxxxxy',
+    '.yxxxxxxy.',
+    '..y.xx.y..',
+    '..y.xx.y..',
     '...y..y...',
     '..........',
   ]),
-  warden: esprite('e-warden', [
+  // The Answerer: pale, coral/bone-ridged, a glowing throat where a mouth
+  // would be — the voice it stole is the one bright thing on it.
+  answerer: esprite('e-answerer', [
     '..WWWWWW..',
     '.WVVVVVVW.',
-    'WVNN..NNVW',
-    'WVVVVVVVVW',
+    'WVVNNNNVVW',
+    'WVVNVVNVVW',
+    'NVVVWWVVVN',
     'NVVVVVVVVN',
     'NNVVVVVVNN',
     '.NNVVVVNN.',
     '.NNVVVVNN.',
     '..NN..NN..',
-    '..NN..NN..',
   ]),
 };
 
-// One-tile car, seen from above — a simple boxy silhouette, direction-neutral
-// (rotation isn't worth the extra sprite variants for an ambient prop).
-const CAR_PALETTE = { c: '#c9524a', d: '#7a2e28', g: '#20242c', w: '#dfe6f0' };
+// One-tile drifter, seen from above — a simple boxy silhouette, direction-
+// neutral (rotation isn't worth the extra sprite variants for an ambient
+// prop). Kept as a machine/hull shape (a submerged relic still drifting the
+// current), not a car — the Waiting City's cars just renamed 1:1 otherwise.
+const DRIFTER_PALETTE = { c: '#4a5a68', d: '#2a343e', g: '#141a20', w: '#8fb8c8' };
 export const CAR_SPRITE = {
-  key: 'car-1',
+  key: 'drifter-1',
   rows: [
     '.cccccc.',
     'cccccccc',
@@ -148,14 +209,14 @@ export const CAR_SPRITE = {
     'cccccccc',
     '.dddddd.',
   ],
-  palette: CAR_PALETTE,
+  palette: DRIFTER_PALETTE,
 };
 
-// Ground tile variants: asphalt (road) vs sidewalk/pavement (everything else
-// walkable). Buildings are drawn procedurally, not through this system.
+// Ground tile variants: current-bed vs open floor. Buildings/structures are
+// drawn procedurally, not through this system.
 const TILE_PALETTE = {
-  p: '#3a3f4a', q: '#424855', r: '#333843', // sidewalk: base, variant, fleck
-  a: '#26282e', b: '#2e3038', // asphalt: base, lane hint
+  p: '#232838', q: '#2a3040', r: '#1c202c', // floor: base, variant, fleck
+  a: '#16202a', b: '#1b2632', // current bed: base, flow-line hint
 };
 export const TILE_SPRITES = {
   groundA: { key: 't-groundA', rows: ['pppp', 'pqpp', 'pppr', 'pppp'], palette: TILE_PALETTE },

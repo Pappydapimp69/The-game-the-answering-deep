@@ -26,7 +26,7 @@ import { canSense, enemyReadout } from '../sim/info.js';
 import { withHint, keyHint } from './device-labels.js';
 import { describeObjective } from './objective-text.js';
 import { drawPixelSprite } from './pixelart.js';
-import { PLAYER_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES } from './sprites.js';
+import { PLAYER_SPRITES, NPC_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES } from './sprites.js';
 
 export const TILE = 24;
 
@@ -166,7 +166,14 @@ export function render(ctx, w, view, now = 0) {
     const n = w.npcs[id];
     add(n.x, n.y, () => {
       const [x, y] = tile(n.x, n.y);
-      drawPixelSprite(ctx, PLAYER_SPRITES['down-0'], x + 2, y + 2, TILE - 4, 'grayscale(0.6) brightness(0.85) hue-rotate(140deg)');
+      // Each NPC has its own silhouette (NPC_SPRITES, keyed by npc id) so
+      // they're tellable apart on sight — a shared recolored player sprite
+      // read as "everyone looks the same" (the fix for that report). Any
+      // NPC without a dedicated def still falls back to the old recolor so
+      // new content never renders blank.
+      const def = NPC_SPRITES[id];
+      if (def) drawPixelSprite(ctx, def, x + 2, y + 2, TILE - 4);
+      else drawPixelSprite(ctx, PLAYER_SPRITES['down-0'], x + 2, y + 2, TILE - 4, 'grayscale(0.6) brightness(0.85) hue-rotate(140deg)');
       ctx.fillStyle = C.dim;
       ctx.font = '9px system-ui, sans-serif';
       ctx.textAlign = 'center';
