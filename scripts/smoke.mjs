@@ -23,7 +23,7 @@ import { bfsNextStep, stepAwayFrom } from '../src/sim/pathfind.js';
 import { hasLineOfSight } from '../src/sim/visibility.js';
 import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
-import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
+import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS, MAX_SPREAD_RADIUS } from '../src/sim/fire.js';
 import { ENEMY_SPRITES, NPC_SPRITES } from '../src/app/sprites.js';
 
 const GOLDEN_DEMO_FINGERPRINT = 'e0a3246a';
@@ -582,6 +582,27 @@ test('fire never spreads onto or persists on a water/road tile', () => {
   assert(w.hazards.fire['15,6'], 'ignition failed');
   for (let i = 0; i < 30; i++) stepFire(w);
   assert(!w.hazards.fire['16,6'], 'fire spread onto a road/water tile');
+});
+test('fire never spreads past MAX_SPREAD_RADIUS from where it started, however long it burns', () => {
+  const w = makeWorld(1);
+  const ox = 8, oy = 6; // open floor, well clear of any structure/road
+  igniteAt(w, ox, oy);
+  // Run far longer than any single tile's fuel could last, so this is
+  // exercising the whole life of a chain of spread ignitions, not just one.
+  for (let i = 0; i < 40; i++) stepFire(w);
+  for (const key of Object.keys(w.hazards.fire)) {
+    const [x, y] = key.split(',').map(Number);
+    const dist = Math.max(Math.abs(x - ox), Math.abs(y - oy));
+    assert(dist <= MAX_SPREAD_RADIUS, `fire tile ${key} is ${dist} tiles from its origin, past MAX_SPREAD_RADIUS(${MAX_SPREAD_RADIUS})`);
+  }
+});
+test('a fire tile burns out on its own in FIRE_FUEL_TICKS regardless of spread elsewhere', () => {
+  const w = makeWorld(1);
+  igniteAt(w, 8, 6);
+  for (let i = 0; i < FIRE_FUEL_TICKS - 1; i++) stepFire(w);
+  assert(w.hazards.fire['8,6'], 'the origin tile burned out before its fuel actually ran out');
+  stepFire(w);
+  assert(!w.hazards.fire['8,6'], 'the origin tile outlived FIRE_FUEL_TICKS');
 });
 
 console.log('# molotov-throwing enemies (igniter kind) + bottle flight/landing');

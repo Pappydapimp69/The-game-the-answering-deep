@@ -1,9 +1,14 @@
 // Deterministic fire/hazard field for The Answering Deep. Mirrors light.js's
 // structure: a small set of authoritative tiles in state.hazards.fire ("x,y"
-// -> {fuel}), stepped once per TICK by a fixed-order cellular automaton, with
-// every fire tile ALSO registered as a light.js source (`fire:${x},${y}`) so
-// "the fire lights the room" falls out of the existing light system for free
-// instead of duplicating illumination logic here.
+// -> {fuel, origin}), stepped once per TICK by a fixed-order cellular
+// automaton, with every fire tile ALSO registered as a light.js source
+// (`fire:${x},${y}`) so "the fire lights the room" falls out of the existing
+// light system for free instead of duplicating illumination logic here.
+//
+// Deliberately small and short-lived: FIRE_FUEL_TICKS burns out in a couple
+// real seconds, and MAX_SPREAD_RADIUS hard-caps how far any one ignition can
+// travel from where it started (a few tiles, not a room) — a brief, local
+// hazard from a thrown bottle, not a persistent blaze.
 //
 // Water is not a new concept: state.region.roads ("current lanes", see
 // content.js) already models where the drift/current runs, so it doubles as
@@ -18,8 +23,16 @@
 
 import { nextInt } from './rng.js';
 
-export const FIRE_FUEL_TICKS = 6;
+// 4 ticks x TICK_MS(500ms, game.js) = 2s — "burn out after a couple seconds".
+export const FIRE_FUEL_TICKS = 4;
 export const FIRE_SPREAD_DENOM = 3; // 1-in-3 chance per open neighbor per tick
+// A hard cap on how far any one ignition can travel from where it started —
+// "only spread a few tiles", independent of RNG luck (unlike MAX_FIRE_TILES
+// below, which only bounds the total COUNT, not the reach). Every fire tile
+// remembers the {x,y} it originally caught from (itself, for a fresh
+// ignition) and spread is refused past this Chebyshev distance from that
+// point, no matter how many consecutive rolls succeed.
+export const MAX_SPREAD_RADIUS = 3;
 export const FIRE_LIGHT_RADIUS = 2;
 export const FIRE_LIGHT_STRENGTH = 50;
 export const FIRE_BURN_DMG_BASE = 2;
@@ -27,7 +40,8 @@ export const FIRE_BURN_DMG_ROLL = 2; // damage = BASE + nextInt(rng, ROLL)
 // Gameplay bound, not a coverage cap: keeps a worst-case spread from ever
 // turning into an unbounded per-tick cost or an unreadable screen full of
 // flame. Fuel decay still runs on every existing fire tile past this count —
-// only NEW spread rolls are skipped.
+// only NEW spread rolls are skipped. MAX_SPREAD_RADIUS above is what actually
+// keeps a single fire small in practice; this is just a backstop.
 export const MAX_FIRE_TILES = 60;
 
 const SPREAD_DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N, E, S, W — fixed order
@@ -46,9 +60,13 @@ function inBounds(state, x, y) {
 
 // Pure mutation: ignite (or refresh) one tile. Fizzles silently on water or a
 // solid tile — no such thing as fire on a current or inside solid reef rock.
-export function igniteAt(state, x, y) {
+// `origin` defaults to this tile itself (a fresh, root ignition — a landed
+// bottle, a test calling this directly); stepFire's own spread calls pass the
+// SPREADING tile's origin along, so a whole connected blaze shares the one
+// point its Chebyshev spread radius is measured from.
+export function igniteAt(state, x, y, origin = { x, y }) {
   if (isWater(state, x, y) || isBlocked(state, x, y)) return;
-  state.hazards.fire[`${x},${y}`] = { fuel: FIRE_FUEL_TICKS };
+  state.hazards.fire[`${x},${y}`] = { fuel: FIRE_FUEL_TICKS, origin };
 }
 
 // Called once per TICK, after any bottle-landing ignitions for this tick have
@@ -71,17 +89,25 @@ export function stepFire(state) {
     }
     if (Object.keys(state.hazards.fire).length >= MAX_FIRE_TILES) continue; // safety valve — decay only, no new spread
     const [x, y] = key.split(',').map(Number);
+    const origin = tile.origin || { x, y };
     for (const [dx, dy] of SPREAD_DIRS) {
       const nx = x + dx, ny = y + dy;
       if (!inBounds(state, nx, ny)) continue;
       const nKey = `${nx},${ny}`;
       if (isBlocked(state, nx, ny) || isWater(state, nx, ny)) continue;
       if (snapshotSet.has(nKey) || ignitedThisStep.has(nKey)) continue;
-      // Always roll, every open neighbor, every tick, regardless of outcome —
-      // same fixed-roll-count discipline as ai.js's patrol branch.
+      // Hard reach cap, checked BEFORE rolling — a neighbor past
+      // MAX_SPREAD_RADIUS from this blaze's origin never gets a roll at all,
+      // so a lucky streak of catches can't push it any farther regardless.
+      if (Math.max(Math.abs(nx - origin.x), Math.abs(ny - origin.y)) > MAX_SPREAD_RADIUS) continue;
+      // Always roll, every open (in-reach) neighbor, every tick, regardless
+      // of outcome — same fixed-roll-count discipline as ai.js's patrol
+      // branch, just scoped to neighbors the radius cap hasn't already ruled
+      // out (so the roll COUNT still only depends on deterministic geometry,
+      // never on prior roll outcomes).
       const catches = nextInt(state.rng, FIRE_SPREAD_DENOM) === 0;
       if (catches) {
-        igniteAt(state, nx, ny);
+        igniteAt(state, nx, ny, origin);
         ignitedThisStep.add(nKey);
       }
     }
