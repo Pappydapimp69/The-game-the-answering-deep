@@ -24,6 +24,7 @@ import { hasLineOfSight } from '../src/sim/visibility.js';
 import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
 import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
+import { ENEMY_SPRITES, NPC_SPRITES } from '../src/app/sprites.js';
 
 const GOLDEN_DEMO_FINGERPRINT = '967e2134';
 
@@ -96,6 +97,25 @@ console.log('# content validation ladder');
 test('shipped content passes every validation rung', () => {
   const errs = validateContent(CONTENT);
   assert(errs.length === 0, `content invalid:\n${errs.join('\n')}`);
+});
+// validateContent has no reason to know about the presentation layer, so a
+// missing sprite for a new kind produces zero build-time signal on its own
+// — renderer.js's fallback (a plain colored block) means it's only visible
+// on an actual live playthrough. This is the cheap guard: every enemy kind
+// content defines must resolve to a real sprite, every NPC ditto, so the
+// exact "new content, forgot the second file" bug can't ship silently
+// again (it did once already — see git history on ENEMY_SPRITES).
+test('every enemy kind has a mapped sprite (no silent colored-block fallback)', () => {
+  for (const kind of Object.keys(CONTENT.enemyKinds)) {
+    assert(ENEMY_SPRITES[kind], `enemyKind '${kind}' has no ENEMY_SPRITES entry — renderer.js will silently fall back to a colored block`);
+  }
+});
+test('every NPC has a mapped sprite (no silent recolored-player fallback)', () => {
+  for (const r of Object.values(CONTENT.regions)) {
+    for (const id of Object.keys(r.npcs)) {
+      assert(NPC_SPRITES[id], `npc '${id}' has no NPC_SPRITES entry — renderer.js will silently fall back to a recolored player sprite`);
+    }
+  }
 });
 test('deliberate content corruptions fail the build, not the player', () => {
   const corrupt = (mut) => { const c = structuredClone(CONTENT); mut(c); return validateContent(c).length > 0; };
