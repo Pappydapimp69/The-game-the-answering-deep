@@ -42,6 +42,7 @@ const BUILDING_COLORS = {
   depot: '#4a4438', tenement: '#3c3a44', hall: '#5c4e28', barracks: '#3a3232',
 };
 const BUILDING_FADE_ALPHA = 0.35;
+const PING_RING_MS = 650; // how long an echo pulse's expanding ring animates
 
 // Charge-only DBZ-style flame overlay (ported from Wrong Sky, where it
 // replaced an always-on aura ring). Full opacity while charging; on release
@@ -113,9 +114,22 @@ export function render(ctx, w, view, now = 0) {
   const maxTY = Math.min(w.region.h - 1, Math.floor((camY + viewHpx) / TILE) + pad);
   const onScreen = (x, y) => x >= minTX - pad && x <= maxTX + pad && y >= minTY - pad && y <= maxTY + pad;
 
-  // --- ground: sidewalk vs road (culled) -----------------------------------
+  // --- the dark: you only see what your echo reveals -----------------------
+  // A tile is visible if it's within a small AMBIENT radius the player can
+  // feel around themselves, OR it was lit by a recent pulse (state.echo.lit,
+  // authoritative). Everything else stays the black background — sight in the
+  // Answering Deep is earned per-pulse, not given.
+  const AMBIENT = 2;
+  const litMap = w.echo && w.echo.lit ? w.echo.lit : {};
+  const visible = (tx, ty) => (
+    Math.max(Math.abs(tx - w.player.x), Math.abs(ty - w.player.y)) <= AMBIENT
+    || Object.prototype.hasOwnProperty.call(litMap, `${tx},${ty}`)
+  );
+
+  // --- ground: current vs floor (culled + dark-gated) ----------------------
   for (let ty = minTY; ty <= maxTY; ty++) {
     for (let tx = minTX; tx <= maxTX; tx++) {
+      if (!visible(tx, ty)) continue;
       const isRoad = Object.prototype.hasOwnProperty.call(w.region.roads, `${tx},${ty}`);
       const even = (tx + ty) % 2 === 0;
       const def = isRoad ? (even ? TILE_SPRITES.roadA : TILE_SPRITES.roadB) : (even ? TILE_SPRITES.groundA : TILE_SPRITES.groundB);
@@ -124,8 +138,9 @@ export function render(ctx, w, view, now = 0) {
   }
 
   // --- build the drawable list (ground-level entities, Y-sorted) ----------
+  // Entities are only drawn on tiles the player can currently see.
   const drawables = [];
-  const add = (x, y, fn) => { if (onScreen(x, y)) drawables.push({ x, y, fn }); };
+  const add = (x, y, fn) => { if (onScreen(x, y) && visible(x, y)) drawables.push({ x, y, fn }); };
 
   for (const id of Object.keys(w.destructibles)) {
     const d = w.destructibles[id];
@@ -239,6 +254,12 @@ export function render(ctx, w, view, now = 0) {
   // buffer needed.
   for (const [bid, b] of Object.entries(w.region.buildings)) {
     if (!onScreen(b.x, b.y) && !onScreen(b.x + b.w - 1, b.y + b.h - 1)) continue;
+    // Dark-gated like everything else: an unlit structure stays black until a
+    // pulse (or proximity) reveals part of its footprint.
+    const bVis = visible(b.x, b.y) || visible(b.x + b.w - 1, b.y)
+      || visible(b.x, b.y + b.h - 1) || visible(b.x + b.w - 1, b.y + b.h - 1)
+      || visible(Math.floor(b.x + b.w / 2), Math.floor(b.y + b.h / 2));
+    if (!bVis) continue;
     const bx = b.x * TILE, by = b.y * TILE;
     const width = b.w * TILE, footHeight = b.h * TILE;
     const riseHeight = b.floors * TILE;
@@ -256,6 +277,21 @@ export function render(ctx, w, view, now = 0) {
       ctx.strokeRect(wx, topY + TILE * 0.4, TILE * 0.35, TILE * 0.5);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // --- echo pulse rings: an expanding ring from the player's last ping,
+  // presentation-only (the reveal itself is authoritative in state.echo.lit).
+  // Rides wall-clock via view.pingAt so it animates smoothly regardless of
+  // the sim tick rate.
+  const pingAge = now - (view.pingAt || -99999);
+  if (pingAge >= 0 && pingAge < PING_RING_MS) {
+    const t = pingAge / PING_RING_MS;
+    const cx = view.pingX * TILE + TILE / 2, cy = view.pingY * TILE + TILE / 2;
+    const maxR = (view.pingLoud ? 9 : 4) * TILE;
+    ctx.strokeStyle = `rgba(126,200,255,${(0.5 * (1 - t)).toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, t * maxR, 0, Math.PI * 2); ctx.stroke();
+    if (view.pingLoud) { ctx.beginPath(); ctx.arc(cx, cy, t * maxR * 0.6, 0, Math.PI * 2); ctx.stroke(); }
   }
 
   // --- HUD (screen space, its own scale) -----------------------------------
@@ -311,9 +347,9 @@ export function render(ctx, w, view, now = 0) {
 
   ctx.fillStyle = COLORS.dim; ctx.font = `${11 * u}px system-ui, sans-serif`;
   const legends = {
-    keyboard: 'Move WASD · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
-    gamepad: 'Move Stick/D-Pad · Attack A · Blast X · Charge Y · Interact RB · Items Start · Dodge B',
-    touch: 'On-screen pad and buttons',
+    keyboard: 'Move WASD · Ping Q · Pulse F · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
+    gamepad: 'Move Stick/D-Pad · Ping LB · Pulse RT · Attack A · Blast X · Charge Y · Interact RB · Dodge B',
+    touch: 'On-screen pad and buttons — PING to see',
   };
   ctx.fillText(legends[view.device] || legends.keyboard, pad2, H - 10 * u);
 
@@ -327,6 +363,7 @@ export function render(ctx, w, view, now = 0) {
     ];
     for (const d of dirs) zones.push(touchBtn(ctx, { ...d, w: dz, h: dz }, u));
     const acts = [
+      { id: 'ping', label: 'PING' }, { id: 'pulse', label: 'PULSE' },
       { id: 'attack', label: 'ATK' }, { id: 'blast', label: 'BLAST' }, { id: 'charge', label: 'CHG' },
       { id: 'interact', label: 'USE' }, { id: 'inventory', label: 'BAG' }, { id: 'dodge', label: 'DODGE' },
     ];

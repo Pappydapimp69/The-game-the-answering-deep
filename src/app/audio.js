@@ -46,6 +46,11 @@ export function makeAudio() {
   function play(name) {
     if (!primed) return;
     switch (name) {
+      // The player's ping is a sharp, broadband-ish click (easy to localize —
+      // per the audio-wayfinding research, clicks beat pure tones); the loud
+      // pulse is a bigger outward whoomp layered under it.
+      case 'ping': blip(900, 0, 'triangle', 0.06, 1300); break;
+      case 'pulse': blip(300, 0, 'sawtooth', 0.22, 1400); blip(680, 0.02, 'triangle', 0.16, 1900); break;
       case 'melee': blip(220, 0, 'square', 0.09, 140); break;
       case 'aura': blip(520, 0, 'sawtooth', 0.16, 180); break;
       case 'hit': blip(160, 0, 'triangle', 0.10); break;

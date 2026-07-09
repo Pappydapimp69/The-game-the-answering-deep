@@ -43,7 +43,7 @@ export function runTitle(canvas) {
     }
 
     function pasteCode() {
-      const raw = (typeof window !== 'undefined' && window.prompt) ? window.prompt('Paste your Wrong Sky code (SAGA2…):', '') : '';
+      const raw = (typeof window !== 'undefined' && window.prompt) ? window.prompt('Paste your Waiting City code (SAGA3…):', '') : '';
       if (!raw) return;
       const res = importSaga(raw);
       if (!res.ok) { sagaNote = `Code rejected: ${res.error}`; saga = null; return; }
@@ -81,9 +81,9 @@ export function runTitle(canvas) {
       ctx.fillStyle = COLORS.bg; ctx.fillRect(0, 0, W, H);
       ctx.textAlign = 'center';
       ctx.fillStyle = COLORS.pickup; ctx.font = `bold ${34 * u}px system-ui, sans-serif`;
-      ctx.fillText('THE WAITING CITY', W / 2, H * 0.2);
+      ctx.fillText('THE ANSWERING DEEP', W / 2, H * 0.2);
       ctx.font = `${13 * u}px system-ui, sans-serif`; ctx.fillStyle = COLORS.dim;
-      ctx.fillText('saga · part three — a tyrant’s city, and enemies that finally move', W / 2, H * 0.2 + 26 * u);
+      ctx.fillText('saga · part four — a lightless deep, and a voice it was never given', W / 2, H * 0.2 + 26 * u);
 
       const zones = [];
       const cx = W / 2;
@@ -112,17 +112,17 @@ export function runTitle(canvas) {
         ctx.fillText('Tone', cx, H * 0.3 + 104 * u);
         zones.push(btn(ctx, { id: 'gentle', label: 'Gentle', on: difficulty === 'gentle', x: cx - 140 * u, y: H * 0.3 + 116 * u, w: 130 * u, h: 34 * u }, device, u));
         zones.push(btn(ctx, { id: 'harsh', label: 'Harsh', on: difficulty === 'harsh', x: cx + 10 * u, y: H * 0.3 + 116 * u, w: 130 * u, h: 34 * u }, device, u));
-        zones.push(btn(ctx, { id: 'code', label: 'Paste Wrong Sky code', x: cx - 130 * u, y: H * 0.3 + 162 * u, w: 260 * u, h: 32 * u }, device, u));
+        zones.push(btn(ctx, { id: 'code', label: 'Paste Waiting City code', x: cx - 130 * u, y: H * 0.3 + 162 * u, w: 260 * u, h: 32 * u }, device, u));
         if (sagaNote) { ctx.fillStyle = saga ? COLORS.good : COLORS.enemy; ctx.font = `${11 * u}px system-ui, sans-serif`; ctx.fillText(sagaNote, cx, H * 0.3 + 208 * u, W - 40 * u); }
         zones.push(btn(ctx, { id: 'start', hintAction: 'confirm', label: 'Begin', x: cx - 100 * u, y: H * 0.3 + 224 * u, w: 200 * u, h: 40 * u }, device, u));
         zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: H * 0.3 + 274 * u, w: 130 * u, h: 30 * u }, device, u));
       } else if (screen === 'controls') {
         ctx.fillStyle = COLORS.dim; ctx.font = `${13 * u}px system-ui, sans-serif`;
         const lines = [
-          'Keyboard — Move WASD/Arrows · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
-          'Gamepad — Move Stick/D-Pad · Attack A · Blast X · Charge Y · Interact RB · Items Start · Dodge B',
-          'Touch — on-screen pad and buttons',
-          'Raise your perception skill in a real fight — high enough, you’ll start reading a guard’s next move, not just their health.',
+          'The deep is dark. PING (Q) to send a pulse that reveals what it touches — but everything with ears turns toward where you called from.',
+          'Keyboard — Move WASD · Ping Q · Pulse F (loud, costs aura) · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
+          'Gamepad — Move Stick/D-Pad · Ping LB · Pulse RT · Attack A · Blast X · Charge Y · Interact RB · Dodge B',
+          'Touch — on-screen pad and buttons. A blast needs a lit target: pulse to see it first.',
         ];
         lines.forEach((l, i) => ctx.fillText(l, cx, H * 0.4 + i * 24 * u, W - 40 * u));
         zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: H * 0.4 + 120 * u, w: 130 * u, h: 30 * u }, device, u));

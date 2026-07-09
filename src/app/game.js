@@ -61,13 +61,17 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     guide: '', shakeX: 0, shakeY: 0, punch: {}, playerPunch: 0, night: 0,
     facing: 'down', walkFrame: 0, charging: false,
     projectiles: [],
+    // Echo ring visual (renderer.js): pingAt is a wall-clock ms stamp of the
+    // last player ping so the ring can expand over real time; the actual
+    // reveal (which tiles are lit) is authoritative in state.echo.lit.
+    pingAt: -99999, pingX: 0, pingY: 0, pingLoud: false,
     // Charge-release aura flame fade (renderer.js): active while the flame
     // eases out after the player stops charging, duration set per the
     // aura-% held at release (see handleWorld's charge-transition below).
     auraFadeActive: false, auraFadeStart: 0, auraFadeDuration: 0,
   };
   if (!initialWorld) {
-    view.modal = mkDialog('THE WAITING CITY', CONTENT.arc.intro, 'continue');
+    view.modal = mkDialog('THE ANSWERING DEEP', CONTENT.arc.intro, 'continue');
   }
   let nextMoveAt = 0, nextTickAt = 0, dodgeUntil = 0;
   let nextChargeAt = 0, wasCharging = false;
@@ -145,12 +149,12 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       case 'quests_offered': {
         const options = e.quests.map((qid) => ({ id: qid, label: world.quests.defs[qid].name }));
         options.push({ id: 'notnow', label: 'Not now' });
-        view.modal = mkModal('offer', 'Ferro', [], options);
+        view.modal = mkModal('offer', 'Wren', [], options);
         break;
       }
-      case 'enemy_incoming': toast(`${kindName(e.kind)} moves to block the road.`); audio.play('quest'); break;
-      case 'enemy_appeared': toast(`${kindName(world.enemies[e.target]?.kind || e.kind)} takes position.`); break;
-      case 'pickup_appeared': toast('Something glints nearby.'); break;
+      case 'enemy_incoming': toast(`Something ${kindName(e.kind)}-shaped stirs in the dark.`); audio.play('quest'); break;
+      case 'enemy_appeared': toast(`A ${kindName(world.enemies[e.target]?.kind || e.kind)} is down here with you now.`); break;
+      case 'pickup_appeared': toast('Your pulse catches something solid nearby.'); break;
       case 'picked_up': toast(`Picked up ${prettify(e.item)}`); audio.play('pickup'); break;
       case 'broke': toast(`Broken — +${e.coins} coins`); punch(e.target); shake(2, 90); audio.play('break'); break;
       case 'enemy_hit':
@@ -163,31 +167,36 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       case 'enemy_defeated':
         toast(`${kindName(e.kind)} defeated!`); hitStop(90); shake(5, 160); audio.play('defeat');
         if (e.target === world.arc.bossDef.id) {
-          view.modal = mkModal('fate', 'The Warden kneels',
-            ['The Warden is beaten either way.', 'Do you depose them, or leave them the title?'],
-            [{ id: 'spare', label: 'Spare them' }, { id: 'depose', label: 'Depose them' }]);
+          view.modal = mkModal('fate', 'The Answerer falls silent',
+            ['It stops, mid-echo. The voice it stole is yours to end — or to make real.',
+             'Do you silence it, or answer it?'],
+            [{ id: 'silence', label: 'Silence it' }, { id: 'answer', label: 'Answer it' }]);
         }
         break;
       case 'player_hit': toast(`Took ${e.dmg} damage`); hitStop(60); shake(Math.min(8, 3 + e.dmg * 0.7), 180); audio.play('hurt'); break;
       case 'skill_up': toast(`${cap(e.skill)} rose to ${e.lvl}!`); break;
-      case 'power_claimed': toast(`You take command — ${cap(e.skill)} ${e.lvl}`); break;
+      case 'power_claimed': toast(`Something settles in you — ${cap(e.skill)} ${e.lvl}`); break;
       case 'objective_progress': toast(`${e.at}/${e.of}`); audio.play('quest'); break;
       case 'quest_completed': toast(`Quest complete! +${e.reward.coins} coins`); audio.play('quest'); break;
       case 'healed': toast(`Recovered — HP ${e.hp}`); audio.play('heal'); break;
       case 'bought': toast(`Bought — ${e.coins} coins left`); break;
       case 'no_aura': toast('Not enough aura — Charge first'); break;
       case 'too_far': toast('Too far away'); break;
+      case 'unlit': toast('You can’t place it — pulse to see it first'); break;
+      case 'ping':
+        if (e.alerted && e.alerted.length) toast('Something out there turns toward you');
+        break;
       case 'cant_afford': toast('Not enough coins'); break;
       case 'no_item': toast('Nothing to drink'); break;
       case 'nothing_there': break;
       case 'player_defeated':
-        view.modal = mkDialog('You fall...', ['The Banks go quiet.'], 'rise', 'Rise Again');
+        view.modal = mkDialog('The dark takes you...', ['The reach goes quiet, and answers no more.'], 'rise', 'Rise Again');
         view.modal.kind = 'defeat';
         break;
-      case 'exit_locked': toast('The harbor road is watched. You are not done here.'); break;
+      case 'exit_locked': toast('The ascent won’t open. Something down here isn’t finished.'); break;
       case 'boss_appeared':
         shake(10, 450); hitStop(150); audio.play('boss');
-        view.modal = mkDialog('The Warden', CONTENT.arc.bossAppeared, 'stand', 'Stand');
+        view.modal = mkDialog('The Answerer', CONTENT.arc.bossAppeared, 'stand', 'Stand');
         break;
       case 'boss_taunted':
         shake(8, 300); hitStop(120); audio.play('boss');
@@ -197,7 +206,7 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
         clearSave();
         audio.play('chapter');
         const code = exportSaga(world);
-        view.modal = mkDialog('THE HARBOR ROAD OPENS', [...CONTENT.arc.finale, '', CONTENT.arc.exportHint, code], 'copy', 'Copy code');
+        view.modal = mkDialog('THE ASCENT OPENS', [...CONTENT.arc.finale, '', CONTENT.arc.exportHint, code], 'copy', 'Copy code');
         view.modal.kind = 'finale';
         view.modal.code = code;
         break;
@@ -235,7 +244,7 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       case 'fate':
         dispatch({ type: 'CHOOSE_FATE', fate: opt.id });
         closeModal();
-        toast(opt.id === 'spare' ? 'You let them keep the title. They watch you go.' : 'You take command of the garrison. It costs you nothing you can name yet.');
+        toast(opt.id === 'silence' ? 'You end the stolen voice. The reach goes truly quiet.' : 'You give it a voice of its own. Something down here can be spoken to now.');
         break;
       case 'inventory':
         if (opt.id === 'close') { closeModal(); break; }
@@ -279,6 +288,17 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
   function handleWorld(now, move, presses, chargeHeld) {
     if (presses.inventory) { openInventory(); return; }
     if (presses.dodge) { dodgeUntil = now + DODGE_MS; toast('Dodge!'); }
+
+    // The signature verbs. A ping/pulse also seeds the expanding-ring visual
+    // (view.pingAt is wall-clock; the sim's echo reveal is authoritative and
+    // read straight from state.echo.lit by the renderer).
+    if (presses.ping || presses.pulse) {
+      const loud = !!presses.pulse;
+      const before = world.player.aura;
+      dispatch({ type: 'PING', loud });
+      if (loud && world.player.aura === before) toast('Not enough aura to pulse');
+      else { view.pingAt = now; view.pingX = world.player.x; view.pingY = world.player.y; view.pingLoud = loud; audio.play(loud ? 'pulse' : 'ping'); }
+    }
 
     if (move.dx || move.dy) {
       view.facing = move.dy > 0 ? 'down' : move.dy < 0 ? 'up' : move.dx > 0 ? 'right' : 'left';
@@ -336,20 +356,20 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
   function computeGuide() {
     if (world.flags.ended) return '';
     const g = CONTENT.arc.guide;
-    if (!(world.quests.offered['city-of-rules'] || world.quests.active['city-of-rules'] || world.quests.completed['city-of-rules'])) return g.talk;
-    if (world.quests.offered['city-of-rules']) return g.talk;
-    if (world.quests.active['city-of-rules']) return g.training;
+    if (!(world.quests.offered['into-the-dark'] || world.quests.active['into-the-dark'] || world.quests.completed['into-the-dark'])) return g.talk;
+    if (world.quests.offered['into-the-dark']) return g.talk;
+    if (world.quests.active['into-the-dark']) return g.training;
     if (world.arc.bossDefeated && !world.arc.complete) return g.choice;
     if (world.arc.complete) return g.gate;
     if (world.arc.bossSpawned) return g.boss;
-    if (world.quests.completed['the-wardens-seal']) return g.arena;
-    if (world.quests.active['the-wardens-seal']) return g.hunt3;
-    if (world.quests.completed['ferros-ledger']) return g.finale;
-    if (world.quests.active['ferros-ledger']) return g.ledger;
-    if (world.quests.completed['watch-them-move']) return g.ledger;
-    if (world.quests.active['watch-them-move']) return g.hunt2;
-    if (world.quests.completed['read-the-city']) return g.hunt2;
-    if (world.quests.active['read-the-city']) return g.hunt1;
+    if (world.quests.completed['sound-the-deep']) return g.arena;
+    if (world.quests.active['sound-the-deep']) return g.hunt3;
+    if (world.quests.completed['the-sounding-line']) return g.finale;
+    if (world.quests.active['the-sounding-line']) return g.ledger;
+    if (world.quests.completed['the-fleeing-kind']) return g.ledger;
+    if (world.quests.active['the-fleeing-kind']) return g.hunt2;
+    if (world.quests.completed['learn-to-listen']) return g.hunt2;
+    if (world.quests.active['learn-to-listen']) return g.hunt1;
     return g.hunt1;
   }
 

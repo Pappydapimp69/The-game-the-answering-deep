@@ -4,17 +4,20 @@
 // Action intents are edge-triggered here so one press = one action, no matter
 // which device fired it or how many systems read the frame.
 
-const ACTIONS = ['attack', 'blast', 'charge', 'interact', 'inventory', 'dodge', 'confirm', 'cancel', 'alt'];
+const ACTIONS = ['attack', 'blast', 'charge', 'interact', 'inventory', 'dodge', 'ping', 'pulse', 'confirm', 'cancel', 'alt'];
 
 const KEYMAP = {
   KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
   KeyJ: 'attack', KeyK: 'blast', KeyL: 'charge', KeyE: 'interact', KeyI: 'inventory',
+  // The signature verbs of The Answering Deep: Q = a free quiet listen,
+  // F = a loud aura pulse (sees/heard far). Both are edge-triggered actions.
+  KeyQ: 'ping', KeyF: 'pulse',
   Space: 'dodge', Enter: 'confirm', Escape: 'cancel',
 };
 
 // Standard-mapping gamepad buttons.
-const PAD = { attack: 0, dodge: 1, blast: 2, charge: 3, interact: 5, inventory: 9, confirm: 0, cancel: 1 };
+const PAD = { attack: 0, dodge: 1, blast: 2, charge: 3, interact: 5, inventory: 9, ping: 4, pulse: 7, confirm: 0, cancel: 1 };
 
 export function makeInput(canvas) {
   const held = {};          // logical name -> bool (keyboard)
