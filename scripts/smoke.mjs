@@ -25,7 +25,7 @@ import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
 import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '0bb6cf95';
+const GOLDEN_DEMO_FINGERPRINT = '967e2134';
 
 const failures = [];
 let count = 0;
@@ -171,16 +171,53 @@ test('the finale is not offered until the sounding-line quest completes', () => 
   assert(!offered || !offered.quests.includes('sound-the-deep'), 'finale offered before its prereqs were met');
 });
 
+console.log('# quest chain: a real branch (requiresAny), not a straight line');
+test('completing learn-to-listen offers BOTH the-fleeing-kind and the-burning-kind at once', () => {
+  const w = makeWorld(1);
+  talkAndAccept(w, 'wren', 'into-the-dark');
+  moveAdjacent(w, { x: 20, y: 10 });
+  talkAndAccept(w, 'wren', 'learn-to-listen');
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 5; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
+  moveAdjacent(w, w.npcs.wren);
+  const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
+  const offered = ev.find((e) => e.type === 'quests_offered');
+  assertEqual(offered.quests.join(','), 'the-burning-kind,the-fleeing-kind', 'both branch quests should be offered together');
+});
+test('the-sounding-line is offered once EITHER branch completes, not requiring both', () => {
+  const w = makeWorld(1);
+  talkAndAccept(w, 'wren', 'into-the-dark');
+  moveAdjacent(w, { x: 20, y: 10 });
+  talkAndAccept(w, 'wren', 'learn-to-listen');
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 5; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
+  // Take the-burning-kind branch (NOT the-fleeing-kind) and confirm that
+  // alone is sufficient — the-fleeing-kind is never touched in this test.
+  talkAndAccept(w, 'wren', 'the-burning-kind');
+  assert(!w.quests.completed['the-fleeing-kind'], 'the-fleeing-kind should never have been accepted, let alone completed');
+  g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.igniter1);
+  for (let i = 0; i < 8; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
+  assert(w.quests.completed['the-burning-kind'], 'the-burning-kind never completed');
+  moveAdjacent(w, w.npcs.wren);
+  const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
+  const offered = ev.find((e) => e.type === 'quests_offered');
+  assert(offered && offered.quests.includes('the-sounding-line'), 'the-sounding-line should be offered via the-burning-kind alone (requiresAny)');
+});
+
 console.log('# gated enemies/pickups still agnostic of prior actions');
 test('shell-elite1/chorusshard1 do not exist before the finale quest is accepted', () => {
   const fresh = makeWorld(1);
   assert(!fresh.enemies['shell-elite1'], 'gated enemy pre-spawned');
   assert(!fresh.pickups.chorusshard1, 'gated pickup pre-spawned');
 });
-test('lurker1/darter1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
+test('lurker1/darter1/igniter1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
   const fresh = makeWorld(1);
   assert(!fresh.enemies.lurker1, 'lurker1 pre-spawned — killable before learn-to-listen is accepted');
   assert(!fresh.enemies.darter1, 'darter1 pre-spawned — killable before the-fleeing-kind is accepted');
+  assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before the-burning-kind is accepted');
   assert(!fresh.pickups.soundingline1, 'soundingline1 pre-spawned — collectable before the-sounding-line is accepted');
 });
 test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not instant-spawn', () => {
@@ -511,6 +548,11 @@ test('standing in fire damages the player each tick and sets onFireTicks', () =>
 test('after leaving the fire, smaller residual damage continues for a bounded window then stops', () => {
   const w = makeWorld(1);
   w.player.x = 8; w.player.y = 6;
+  // Wall off all 4 neighbors so this fire tile can never spread — isolates
+  // the test from the cellular automaton entirely (same technique as the
+  // fuel-decay test above), so it can only ever measure the RESIDUAL-burn
+  // timer, never an unrelated re-ignition reaching the player's new tile.
+  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100 };
   igniteAt(w, 8, 6);
   reduce(w, { type: 'TICK' }); // catches fire
   assert(w.player.onFireTicks > 0, 'player never caught fire');

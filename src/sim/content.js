@@ -133,13 +133,13 @@ export const CONTENT = {
         // see reduce.js ACCEPT_QUEST / world.js gatedEnemyIds. A fresh,
         // guaranteed-killable instance, so a free-roam kill can't soft-lock it.
         'shell-elite1': { kind: 'shell', x: 21, y: 14 },
-        // Free-roam (not quest-gated) — deliberately far (chebyshev >= 7) from
-        // both the y=10 main current and every other placed entity, so the
-        // fixed demo script (src/sim/demo.js, which only ever walks y=10 then
-        // straight to a target column) never comes within its hearing/aggro/
-        // throwRange. The molotov mechanic gets dedicated smoke-test coverage
-        // instead of incidental interaction with the golden-replay's quest
-        // chain. Verified against content.js's actual blocked/roads at (13,19).
+        // Existence-gated behind 'the-burning-kind' (see below) — also
+        // deliberately far (chebyshev >= 7) from both the y=10 main current
+        // and every other placed entity, so even once spawned it stays clear
+        // of the fixed demo script's path (src/sim/demo.js, which only ever
+        // walks y=10 then straight to a target column) unless that branch is
+        // actually taken. Verified against content.js's actual blocked/roads
+        // at (13,19).
         igniter1: { kind: 'igniter', x: 13, y: 19 },
       },
       destructibles: {
@@ -238,6 +238,14 @@ export const CONTENT = {
       // before accepting this quest, permanently soft-locking the objective.
       unlocks: { enemies: ['lurker1'] },
     },
+    // A real branch point, not a straight line: 'the-fleeing-kind' and
+    // 'the-burning-kind' are both offered the moment 'learn-to-listen'
+    // completes, and 'the-sounding-line' below only needs ONE of the two
+    // done (requiresAny — an OR prereq, see reduce.js's TALK case and
+    // validate.js). The other stays available afterward (talk to Wren
+    // again) for a player who wants both, but nothing gates progress on
+    // completing both. This is the structural divergence from a strictly
+    // linear "reach -> kill -> kill -> collect -> ..." chain.
     'the-fleeing-kind': {
       name: 'The Fleeing Kind',
       giver: 'wren',
@@ -246,10 +254,21 @@ export const CONTENT = {
       reward: { coins: 5 },
       unlocks: { enemies: ['darter1'] },
     },
+    'the-burning-kind': {
+      name: 'The Burning Kind',
+      giver: 'wren',
+      requires: ['learn-to-listen'],
+      objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
+      reward: { coins: 5 },
+      // Existence-gated the same way as every other quest-tied kill target —
+      // igniter1 doesn't exist in state.enemies until this quest is
+      // accepted, so a free-roam kill can't soft-lock the objective.
+      unlocks: { enemies: ['igniter1'] },
+    },
     'the-sounding-line': {
       name: 'The Sounding Line',
       giver: 'wren',
-      requires: ['the-fleeing-kind'],
+      requiresAny: ['the-fleeing-kind', 'the-burning-kind'],
       objectives: [{ type: 'collect', item: 'sounding-line' }],
       reward: { coins: 5 },
       // A free pickup is the collect-objective analog of the same soft-lock:

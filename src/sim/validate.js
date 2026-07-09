@@ -112,6 +112,15 @@ export function validateContent(c) {
     for (const req of q.requires || []) {
       if (!c.quests?.[req]) err(`quest ${qid}: requires unknown quest ${req}`);
     }
+    // requiresAny: an OR prereq (at least one, not all) — a real branch point
+    // (see 'the-sounding-line', satisfiable by either 'the-fleeing-kind' or
+    // 'the-burning-kind'), as opposed to `requires`' AND semantics.
+    if (q.requiresAny !== undefined) {
+      if (!Array.isArray(q.requiresAny) || q.requiresAny.length < 2) err(`quest ${qid}: requiresAny must be an array of 2+ quest ids if present`);
+      for (const req of q.requiresAny || []) {
+        if (!c.quests?.[req]) err(`quest ${qid}: requiresAny unknown quest ${req}`);
+      }
+    }
   }
 
   for (const [rid, r] of Object.entries(c.regions || {})) {
@@ -194,9 +203,9 @@ export function validateContent(c) {
       }
     }
   }
-  // A quest chain must actually be reachable: every `requires` edge (ALL of
-  // them, not just the first) must bottom out at quests with no prereqs — no
-  // cycles, nothing permanently locked.
+  // A quest chain must actually be reachable: every `requires`/`requiresAny`
+  // edge (ALL of them, not just the first) must bottom out at quests with no
+  // prereqs — no cycles, nothing permanently locked.
   for (const qid of Object.keys(c.quests || {})) {
     const path = new Set();
     let cycle = false;
@@ -204,7 +213,8 @@ export function validateContent(c) {
       if (cycle || depth > 50) return;
       if (path.has(cur)) { err(`quest ${qid}: requires-chain cycle detected at ${cur}`); cycle = true; return; }
       path.add(cur);
-      for (const req of c.quests[cur]?.requires || []) visit(req, depth + 1);
+      const edges = [...(c.quests[cur]?.requires || []), ...(c.quests[cur]?.requiresAny || [])];
+      for (const req of edges) visit(req, depth + 1);
       path.delete(cur);
     };
     visit(qid, 0);

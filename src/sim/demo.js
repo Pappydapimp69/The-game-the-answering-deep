@@ -58,8 +58,13 @@ export function demoCommands() {
   for (let i = 0; i < 5; i++) cmds.push({ type: 'MELEE', enemyId: 'lurker1' });
 
   // --- Quest 3: The Fleeing Kind (kill a Darter — immune: melee) ----------
+  // This TALK actually offers TWO quests now (the-fleeing-kind AND its
+  // branch-mate the-burning-kind — see content.js), since 'the-sounding-line'
+  // only needs ONE of them done (requiresAny). This replay takes the
+  // fleeing-kind path; the-burning-kind gets its own dedicated smoke
+  // coverage instead of incidental exercise here.
   walkTo(3, 10);
-  cmds.push({ type: 'TALK', npcId: 'wren' }); // offers 'the-fleeing-kind'
+  cmds.push({ type: 'TALK', npcId: 'wren' }); // offers 'the-fleeing-kind' + 'the-burning-kind'
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'the-fleeing-kind' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' });
   walkTo(21, 15);

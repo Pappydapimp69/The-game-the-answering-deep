@@ -214,6 +214,10 @@ function reduceCore(state, command) {
         .filter(([qid, def]) => def.giver === command.npcId)
         .filter(([qid]) => !state.quests.active[qid] && !state.quests.completed[qid])
         .filter(([qid, def]) => (def.requires || []).every((r) => state.quests.completed[r]))
+        // requiresAny: an OR prereq (a branch point — either path unlocks the
+        // next quest), distinct from `requires`' AND semantics above. Both
+        // can be present; a quest with only requiresAny has no `requires`.
+        .filter(([qid, def]) => !def.requiresAny || def.requiresAny.some((r) => state.quests.completed[r]))
         .map(([qid]) => qid)
         .sort();
       if (offerable.length) {
