@@ -35,7 +35,7 @@ export const COLORS = {
   player: '#ffb74d', aura: '#7ec8ff', npc: '#6de0c2', enemy: '#e05a5a',
   dead: '#3a3f52', crate: '#a1745b', pickup: '#ffd75e', text: '#e6ebf7',
   dim: '#98a3c0', hp: '#e05a5a', bar: '#1a2140', good: '#8ff0a6',
-  rival: '#caa23a',
+  rival: '#caa23a', light: '#ffe28a',
 };
 
 const BUILDING_COLORS = {
@@ -142,17 +142,28 @@ export function render(ctx, w, view, now = 0) {
   const maxTY = Math.min(w.region.h - 1, Math.floor((camY + viewHpx) / TILE) + pad);
   const onScreen = (x, y) => x >= minTX - pad && x <= maxTX + pad && y >= minTY - pad && y <= maxTY + pad;
 
-  // --- the dark: you only see what your echo reveals -----------------------
-  // A tile is visible if it's within a small AMBIENT radius the player can
-  // feel around themselves, OR it was lit by a recent pulse (state.echo.lit,
-  // authoritative). Everything else stays the black background — sight in the
-  // Answering Deep is earned per-pulse, not given.
+  // --- the dark: you only see what your echo/light reveals -----------------
+  // A tile's visibility is graduated (0-100), the MAX of whichever modality
+  // currently reaches it: a small always-on AMBIENT radius, a recent echo
+  // pulse (state.echo.lit, momentary), or a persistent light source
+  // (state.light.tiles, src/sim/light.js — a fixed vent, or later a fire/lit
+  // bottle/the charged aura). All three are authoritative; this is a pure
+  // read, never a write. `visible` is the boolean draw-gate; `tileLight` is
+  // also used for the light-gem HUD reading the PLAYER'S OWN tile — a
+  // graduated exposure readout has to ship WITH a light-based system, not
+  // after, or the player can't reason about how visible THEY currently are.
   const AMBIENT = 2;
   const litMap = w.echo && w.echo.lit ? w.echo.lit : {};
-  const visible = (tx, ty) => (
-    Math.max(Math.abs(tx - w.player.x), Math.abs(ty - w.player.y)) <= AMBIENT
-    || Object.prototype.hasOwnProperty.call(litMap, `${tx},${ty}`)
-  );
+  const lightMap = w.light && w.light.tiles ? w.light.tiles : {};
+  const tileLight = (tx, ty) => {
+    let level = 0;
+    if (Math.max(Math.abs(tx - w.player.x), Math.abs(ty - w.player.y)) <= AMBIENT) level = Math.max(level, 45);
+    if (Object.prototype.hasOwnProperty.call(litMap, `${tx},${ty}`)) level = Math.max(level, 85);
+    const lv = lightMap[`${tx},${ty}`];
+    if (lv) level = Math.max(level, lv);
+    return level;
+  };
+  const visible = (tx, ty) => tileLight(tx, ty) > 0;
 
   // --- ground: current vs floor (culled + dark-gated) ----------------------
   for (let ty = minTY; ty <= maxTY; ty++) {
@@ -345,6 +356,12 @@ export function render(ctx, w, view, now = 0) {
 
   bar(ctx, pad2, pad2, 150 * u, 12 * u, w.player.hp / w.player.maxHp, COLORS.hp, `HP ${w.player.hp}/${w.player.maxHp}`, u);
   bar(ctx, pad2, pad2 + 18 * u, 150 * u, 12 * u, w.player.aura / w.player.maxAura, COLORS.aura, `Aura ${w.player.aura}/${w.player.maxAura}`, u);
+  // Light gem: how exposed the player currently is (own-tile reading of the
+  // same graduated tileLight() the darkness-gate above uses) — a Thief-style
+  // legible readout so the player can reason about their own visibility,
+  // not just guess from the screen's overall darkness.
+  const gem = tileLight(w.player.x, w.player.y);
+  bar(ctx, pad2, pad2 + 36 * u, 150 * u, 12 * u, gem / 100, COLORS.light, `Exposed ${gem}%`, u);
   ctx.fillStyle = COLORS.pickup; ctx.font = `${12 * u}px system-ui, sans-serif`;
   ctx.fillText(`⛁ ${w.player.coins}`, pad2 + 162 * u, pad2 + 10 * u);
   ctx.fillStyle = COLORS.dim;
@@ -384,12 +401,7 @@ export function render(ctx, w, view, now = 0) {
   ctx.globalAlpha = 1;
 
   ctx.fillStyle = COLORS.dim; ctx.font = `${11 * u}px system-ui, sans-serif`;
-  const legends = {
-    keyboard: 'Move WASD · Ping Q · Pulse F · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
-    gamepad: 'Move Stick/D-Pad · Ping LB · Pulse RT · Attack A · Blast X · Charge Y · Interact RB · Dodge B',
-    touch: 'On-screen pad and buttons — PING to see',
-  };
-  ctx.fillText(legends[view.device] || legends.keyboard, pad2, H - 10 * u);
+  ctx.fillText(legendFor(view.device), pad2, H - 10 * u);
 
   if (view.device === 'touch') {
     const dz = 42 * u, cx = 70 * u, cy = H - 92 * u;
@@ -482,6 +494,17 @@ function drawModal(ctx, W, H, u, view) {
 }
 
 // --- helpers ----------------------------------------------------------------
+// Gameplay-action hints are rebindable, so this is re-derived every frame
+// from the live bindings (see device-labels.js/input.js) rather than a
+// hardcoded string per device.
+function legendFor(device) {
+  if (device === 'touch') return 'On-screen pad and buttons — PING to see';
+  const h = (a) => keyHint(device, a);
+  return device === 'gamepad'
+    ? `Move Stick/D-Pad · Ping ${h('ping')} · Pulse ${h('pulse')} · Attack ${h('attack')} · Blast ${h('blast')} · Charge ${h('charge')} · Interact ${h('interact')} · Dodge ${h('dodge')}`
+    : `Move WASD · Ping ${h('ping')} · Pulse ${h('pulse')} · Attack ${h('attack')} · Blast ${h('blast')} · Charge ${h('charge')} · Interact ${h('interact')} · Items ${h('inventory')} · Dodge ${h('dodge')}`;
+}
+
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function clampCam(v, worldSize, viewSize) {
   if (worldSize <= viewSize) return (worldSize - viewSize) / 2;

@@ -7,11 +7,13 @@
 
 import { makeRng } from './rng.js';
 import { CONTENT } from './content.js';
+import { recomputeLight } from './light.js';
 
 // Bumped per game so an incompatible old save routes cleanly to New Game
 // (save.js's version check) instead of crashing on a missing/renamed field.
-// 'answeringdeep4' — game 4, the echo/dark/hearing schema.
-export const WORLD_VERSION = 'answeringdeep4';
+// .1: added state.light (persistent light sources) — an old save lacking it
+// would throw the first time anything reads state.light.tiles.
+export const WORLD_VERSION = 'answeringdeep4.1';
 
 export function makeWorld(seed, options = {}) {
   if (!Number.isInteger(seed)) throw new Error('makeWorld: seed must be an integer');
@@ -81,7 +83,7 @@ export function makeWorld(seed, options = {}) {
   }
   const items = JSON.parse(JSON.stringify(CONTENT.items));
 
-  return {
+  const state = {
     version: WORLD_VERSION,
     seed: seed >>> 0,
     tick: 0,
@@ -127,6 +129,13 @@ export function makeWorld(seed, options = {}) {
     // reveal window, so it stays bounded and fully deterministic (integers
     // only, fingerprinted). The renderer reads it; it never writes it.
     echo: { lit: {}, lastPingTick: -99, lastPingX: -1, lastPingY: -1 },
+    // Persistent light sources (src/sim/light.js) — unlike echo.lit (a pulse
+    // that decays over ticks), a light source stays on the whole time it
+    // exists; `tiles` is the CURRENT computed field, recomputed whenever a
+    // source is added/removed/moved (right below, once, for this region's
+    // fixed ambient sources; reduce.js's PING/TICK cases recompute it again
+    // whenever a dynamic source — e.g. a lit thrown bottle — changes).
+    light: { sources: {}, tiles: {} },
     quests: { defs: questDefs, offered: {}, active: {}, completed: {} },
     arc: {
       bossDef: {
@@ -150,6 +159,18 @@ export function makeWorld(seed, options = {}) {
       wardenFate: (options.saga && options.saga.choices && options.saga.choices.wardenFate) || '',
     },
   };
+
+  // Seed this region's fixed ambient light sources (bioluminescent vents —
+  // content-authored, never move) and compute the initial field once. Any
+  // FUTURE dynamic source (a lit thrown bottle, a burning tile, the player's
+  // own charged aura) is added/removed by reduce.js, which recomputes the
+  // field the same way — this is just construction time's version of that.
+  for (const [id, ls] of Object.entries(regionDef.lightSources || {})) {
+    state.light.sources[id] = { x: ls.x, y: ls.y, radius: ls.radius, strength: ls.strength };
+  }
+  recomputeLight(state);
+
+  return state;
 }
 
 function makeEnemy(id, e) {

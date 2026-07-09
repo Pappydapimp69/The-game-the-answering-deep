@@ -90,6 +90,12 @@ export function validateContent(c) {
       else if (!Object.prototype.hasOwnProperty.call(r.roads || {}, `${cr.x},${cr.y}`)) err(`region ${rid}: car ${id} does not start on a road tile`);
       if (!['N', 'E', 'S', 'W'].includes(cr.dir)) err(`region ${rid}: car ${id} bad dir ${cr.dir}`);
     }
+    for (const [id, ls] of Object.entries(r.lightSources || {})) {
+      if (!inBounds(ls.x, ls.y)) err(`region ${rid}: lightSource ${id} out of bounds`);
+      else if (blockedSet.has(`${ls.x},${ls.y}`)) err(`region ${rid}: lightSource ${id} on a blocked tile`);
+      if (!isInt(ls.radius) || ls.radius < 1) err(`region ${rid}: lightSource ${id} bad radius`);
+      if (!isInt(ls.strength) || ls.strength < 1 || ls.strength > 100) err(`region ${rid}: lightSource ${id} bad strength (must be 1-100)`);
+    }
     if (blockedSet.has(`${r.spawn?.x},${r.spawn?.y}`)) err(`region ${rid}: spawn on blocked tile`);
   }
   for (const [qid, q] of Object.entries(c.quests || {})) {

@@ -22,8 +22,9 @@ import { describeObjective } from '../src/app/objective-text.js';
 import { bfsNextStep, stepAwayFrom } from '../src/sim/pathfind.js';
 import { hasLineOfSight } from '../src/sim/visibility.js';
 import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
+import { recomputeLight, lightAt } from '../src/sim/light.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '60716a35';
+const GOLDEN_DEMO_FINGERPRINT = '9f3223c4';
 
 const failures = [];
 let count = 0;
@@ -265,6 +266,43 @@ test('you cannot aura-blast an unlit target, but can once a pulse reveals it', (
   reduce(w, { type: 'PING' });
   const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
   assert(seen.some((ev) => ev.type === 'enemy_hit'), 'once lit, the blast should land');
+});
+test('light.js: falls off with distance, clamped to 0 at the edge of radius', () => {
+  const w = makeWorld(1);
+  w.light.sources = { test: { x: 2, y: 10, radius: 4, strength: 40 } };
+  recomputeLight(w);
+  assertEqual(lightAt(w, 2, 10), 40, 'origin should read full strength');
+  const mid = lightAt(w, 4, 10);
+  assert(mid > 0 && mid < 40, 'a tile partway out should be dimmer than the source but not dark');
+  assertEqual(lightAt(w, 20, 20), 0, 'a tile far outside every source reads 0');
+});
+test('light.js: overlapping sources add, clamped to 100', () => {
+  const w = makeWorld(1);
+  w.light.sources = {
+    a: { x: 2, y: 10, radius: 3, strength: 90 },
+    b: { x: 3, y: 10, radius: 3, strength: 90 },
+  };
+  recomputeLight(w);
+  const overlap = lightAt(w, 2, 10);
+  assert(overlap > 90, 'two overlapping sources should sum brighter than either alone');
+  assert(overlap <= 100, 'combined intensity must clamp to 100');
+});
+test('light.js: a wall blocks a source exactly like it blocks sound', () => {
+  const w = makeWorld(1);
+  w.region.blocked = { ...w.region.blocked, '3,10': 100 };
+  w.light.sources = { test: { x: 2, y: 10, radius: 5, strength: 80 } };
+  recomputeLight(w);
+  assertEqual(lightAt(w, 3, 10), 0, 'a wall tile must never receive a light value');
+  assert(lightAt(w, 4, 10) > 0, 'light should still bend around the wall to reach the far side, like echo does');
+});
+test('a persistent light source satisfies the aura-blast reveal-gate on its own, no ping needed', () => {
+  const w = makeWorld(1);
+  w.light.sources = { test: { x: w.player.x + 2, y: w.player.y, radius: 3, strength: 60 } };
+  recomputeLight(w);
+  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 2, w.player.y);
+  chargeTo(w, 6);
+  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  assert(seen.some((ev) => ev.type === 'enemy_hit'), 'a lit-by-source target should be blastable without ever pinging');
 });
 test('a loud ping spends aura and reaches farther than a free quiet ping', () => {
   const w = makeWorld(1);

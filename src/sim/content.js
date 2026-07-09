@@ -151,6 +151,16 @@ export const CONTENT = {
         drifter1: { x: 2, y: 10, dir: 'E' },
         drifter2: { x: 16, y: 3, dir: 'S' },
       },
+      // Fixed, ever-on light sources (src/sim/light.js) — bioluminescent
+      // vents, small pools of safety/orientation in an otherwise pulse-lit
+      // dark. Never move, never gated — atmosphere and a light-gem proving
+      // ground that exists before any dynamic source (fire, a lit bottle,
+      // the charged aura) does. radius/strength are both small deliberately:
+      // this is a dim pool, not a flood — echo stays the primary way to see.
+      lightSources: {
+        vent1: { x: 11, y: 6, radius: 3, strength: 55 },
+        vent2: { x: 11, y: 15, radius: 3, strength: 55 },
+      },
       boss: { id: 'answerer1', kind: 'answerer', x: 29, y: 9 },
     },
   },

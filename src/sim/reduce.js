@@ -22,6 +22,7 @@ import { nextInt } from './rng.js';
 import { isNight } from './daynight.js';
 import { decideEnemyAction, decideCarStep } from './ai.js';
 import { echoDistanceMap, revealSet, heardAt } from './sound.js';
+import { lightAt } from './light.js';
 
 const MELEE_RANGE = 1;
 const BLAST_RANGE = 3;
@@ -323,10 +324,15 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function dist(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
 
 // A tile is "lit" (drawable / targetable) if a pulse touched it within the
-// reveal window. state.echo.lit only ever holds recently-pinged tiles (the
-// TICK case prunes the rest), so presence is sufficient.
+// reveal window OR a persistent light source currently reaches it — two
+// modalities, either one sufficient. state.echo.lit only ever holds
+// recently-pinged tiles (the TICK case prunes the rest); state.light.tiles is
+// always current (recomputeLight runs whenever a source changes), so a
+// bioluminescent vent satisfies the reveal-gate exactly like a ping does.
 function isLit(state, x, y) {
-  return Object.prototype.hasOwnProperty.call(state.echo.lit, `${x},${y}`);
+  const key = `${x},${y}`;
+  if (Object.prototype.hasOwnProperty.call(state.echo.lit, key)) return true;
+  return lightAt(state, x, y) > 0;
 }
 
 // Emit a pulse from (ox,oy): light every tile it reaches (perception scales
