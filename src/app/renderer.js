@@ -176,6 +176,24 @@ export function render(ctx, w, view, now = 0) {
     }
   }
 
+  // --- fire tiles: a cheap additive glow, same gradient-fill technique as
+  // drawAuraFlame (globalCompositeOperation = 'lighter', no per-tile
+  // ctx.filter in this hot loop). Only drawn where already visible — fire is
+  // just another light source, not a separate reveal mechanism.
+  for (const key of Object.keys(w.hazards.fire)) {
+    const [fx, fy] = key.split(',').map(Number);
+    if (!onScreen(fx, fy) || !visible(fx, fy)) continue;
+    const cx = fx * TILE + TILE / 2, cy = fy * TILE + TILE / 2;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, TILE * 0.6);
+    grad.addColorStop(0, 'rgba(255,140,40,0.65)');
+    grad.addColorStop(1, 'rgba(255,80,20,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, TILE * 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // --- build the drawable list (ground-level entities, Y-sorted) ----------
   // Entities are only drawn on tiles the player can currently see.
   const drawables = [];
@@ -256,14 +274,48 @@ export function render(ctx, w, view, now = 0) {
       ctx.restore();
     });
   }
+  // Bottles in flight: interpolate the same way reduce.js does (its
+  // authoritative light source position isn't exposed for reuse here, so the
+  // renderer mirrors the x0+(x1-x0)*t math exactly) and draw a small bright
+  // spark, no sprite needed.
+  for (const id of Object.keys(w.hazards.bottles)) {
+    const b = w.hazards.bottles[id];
+    const t = Math.max(0, Math.min(1, (w.tick - b.startTick) / b.travelTicks));
+    const bx = Math.round(b.x0 + (b.x1 - b.x0) * t);
+    const by = Math.round(b.y0 + (b.y1 - b.y0) * t);
+    add(bx, by, () => {
+      const [x, y] = tile(bx, by);
+      ctx.fillStyle = '#ffb347';
+      ctx.beginPath(); ctx.arc(x + TILE / 2, y + TILE / 2, 4, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
   const ppx = view.px * TILE, ppy = view.py * TILE;
   add(view.px, view.py, () => {
     if (view.dodging) ctx.globalAlpha = 0.45;
+    // Player-on-fire glow: a small warm radial gradient behind the sprite,
+    // cheaper and less visually clashing than reusing the blue aura flame
+    // with a warm tint.
+    if (w.player.onFireTicks > 0) {
+      const fcx = ppx + TILE / 2, fcy = ppy + TILE * 0.55;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const fgrad = ctx.createRadialGradient(fcx, fcy, 0, fcx, fcy, TILE * 0.7);
+      fgrad.addColorStop(0, 'rgba(255,120,30,0.6)');
+      fgrad.addColorStop(1, 'rgba(255,60,10,0)');
+      ctx.fillStyle = fgrad;
+      ctx.beginPath(); ctx.arc(fcx, fcy, TILE * 0.7, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
     // Drawn BEFORE the sprite, centered on the whole silhouette (not the
     // head) — the flame surrounds the body and the character stands IN it,
     // rather than the flame sitting on top like a hat.
     const auraAlpha = auraFlameAlpha(view, now);
-    if (auraAlpha > 0) drawAuraFlame(ctx, ppx + TILE / 2, ppy + TILE * 0.55, auraAlpha, now);
+    // Charge scales the flame's radius with how much aura is currently held
+    // — the mechanical charge-light's cosmetic tie-in (radiusScale was
+    // already stubbed in for exactly this reuse).
+    const chargeScale = view.charging ? 1 + (w.player.aura / Math.max(1, w.player.maxAura)) * 0.6 : 1;
+    if (auraAlpha > 0) drawAuraFlame(ctx, ppx + TILE / 2, ppy + TILE * 0.55, auraAlpha, now, chargeScale);
     const key = view.charging ? 'charge' : `${view.facing === 'left' || view.facing === 'right' ? 'side' : view.facing}-${view.walkFrame}`;
     const def = PLAYER_SPRITES[key] || PLAYER_SPRITES['down-0'];
     if (view.facing === 'right') {

@@ -43,6 +43,10 @@ export function validateContent(c) {
       if (!isInt(k.fleeAt) || k.fleeAt < 0 || k.fleeAt > 100) err(`enemyKind ${id}: bad fleeAt`);
       if (!isInt(k.resumeAt) || k.resumeAt <= k.fleeAt || k.resumeAt > 100) err(`enemyKind ${id}: resumeAt must be an int > fleeAt and <= 100`);
     }
+    if (k.throwRange !== undefined) {
+      if (!isInt(k.throwRange) || k.throwRange < 1) err(`enemyKind ${id}: bad throwRange`);
+      if (!isInt(k.throwCooldownTicks) || k.throwCooldownTicks < 1) err(`enemyKind ${id}: throwCooldownTicks must be a positive int if throwRange is set`);
+    }
   }
   for (const [id, it] of Object.entries(c.items || {})) {
     if (it.price !== undefined && (!isInt(it.price) || it.price < 0)) err(`item ${id}: bad price`);

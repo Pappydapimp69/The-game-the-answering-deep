@@ -89,6 +89,25 @@ export function decideEnemyAction(state, id, claimed) {
   if (next !== e.aiState) { e.aiState = next; e.stateTicks = 0; }
   else e.stateTicks += 1;
 
+  // Projectile-armed kinds (e.g. igniter) throw a molotov at range instead of
+  // closing to melee. Bottle travel/landing is NOT decided here — it's
+  // TICK-level bookkeeping in reduce.js, so every bottle (including one just
+  // created this tick) is processed by one piece of uniform code, never
+  // duplicated between "just thrown" and "already in flight".
+  if (kind.throwRange) {
+    if (e.throwCooldown > 0) e.throwCooldown -= 1;
+    if (next === 'chase' && distToPlayer > 1 && distToPlayer <= kind.throwRange && e.throwCooldown === 0) {
+      const bottleId = `bottle_${id}_${state.tick}`;
+      const travelTicks = Math.max(1, Math.ceil(distToPlayer / 2));
+      state.hazards.bottles[bottleId] = {
+        x0: e.x, y0: e.y, x1: player.x, y1: player.y,
+        startTick: state.tick, travelTicks,
+      };
+      e.throwCooldown = kind.throwCooldownTicks;
+      return; // stands still to throw — skips the movement step below entirely
+    }
+  }
+
   let step = null;
   if (next === 'chase') {
     step = bfsNextStep(state, e.x, e.y, player.x, player.y, claimed);

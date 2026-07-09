@@ -13,7 +13,8 @@ import { recomputeLight } from './light.js';
 // (save.js's version check) instead of crashing on a missing/renamed field.
 // .1: added state.light (persistent light sources) — an old save lacking it
 // would throw the first time anything reads state.light.tiles.
-export const WORLD_VERSION = 'answeringdeep4.1';
+// .2: added state.hazards (fire/molotov), player.onFireTicks/lastChargeTick, enemy.throwCooldown.
+export const WORLD_VERSION = 'answeringdeep4.2';
 
 export function makeWorld(seed, options = {}) {
   if (!Number.isInteger(seed)) throw new Error('makeWorld: seed must be an integer');
@@ -94,6 +95,7 @@ export function makeWorld(seed, options = {}) {
       hp: arch.hp, maxHp: arch.hp,
       aura: 0, maxAura: arch.aura,
       chargeHold: 0,
+      onFireTicks: 0, lastChargeTick: -999,
       coins: 0,
       skills,
       inventory: [],
@@ -136,6 +138,11 @@ export function makeWorld(seed, options = {}) {
     // fixed ambient sources; reduce.js's PING/TICK cases recompute it again
     // whenever a dynamic source — e.g. a lit thrown bottle — changes).
     light: { sources: {}, tiles: {} },
+    // Fire/molotov hazards (src/sim/fire.js). `bottles` holds in-flight
+    // thrown molotovs (id -> {x0,y0,x1,y1,startTick,travelTicks}); `fire`
+    // holds burning tiles (id "x,y" -> {fuel}). Both are stepped by
+    // reduce.js's TICK case; fire tiles also register as light.js sources.
+    hazards: { bottles: {}, fire: {} },
     quests: { defs: questDefs, offered: {}, active: {}, completed: {} },
     arc: {
       bossDef: {
@@ -193,5 +200,9 @@ function makeEnemy(id, e) {
     // are -1 when nothing has been heard.
     hearing: kind.hearing || 5,
     heardX: -1, heardY: -1,
+    // Only meaningful for kinds with `throwRange` (src/sim/ai.js) — harmless
+    // dead weight for every other kind, kept uniform so makeEnemy() doesn't
+    // need a kind-conditional shape.
+    throwCooldown: 0,
   };
 }

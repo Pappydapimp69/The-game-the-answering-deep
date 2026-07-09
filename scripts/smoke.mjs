@@ -23,8 +23,9 @@ import { bfsNextStep, stepAwayFrom } from '../src/sim/pathfind.js';
 import { hasLineOfSight } from '../src/sim/visibility.js';
 import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
+import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '9f3223c4';
+const GOLDEN_DEMO_FINGERPRINT = '6d90893c';
 
 const failures = [];
 let count = 0;
@@ -258,7 +259,14 @@ test('lit tiles expire after the reveal window', () => {
 });
 test('you cannot aura-blast an unlit target, but can once a pulse reveals it', () => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 2, w.player.y);
+  // Distance 3 (the max BLAST_RANGE), not 2: charging now emits its own
+  // aura-light (see reduce.js's CHARGE case), whose radius maxes out at 3 —
+  // by construction its falloff always reaches exactly 0 at that boundary
+  // (falloffPerStep = ceil(strength/radius) => strength - radius*falloffPerStep
+  // <= 0), so a target sitting AT distance 3 is guaranteed to stay unlit from
+  // charging alone, keeping this test's premise (only a PING reveals it,
+  // not the act of charging) valid under the new mechanic.
+  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 3, w.player.y);
   chargeTo(w, 6);
   const blind = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
   assert(blind.some((ev) => ev.type === 'unlit'), 'blasting an un-echo-located target should be refused as unlit');
@@ -414,6 +422,156 @@ test('the Answerer stays on the flat perception-stat gate — a deliberate one-s
   assert(!canReadIntent(seeker.player, 'answerer'), 'perception 3 should not yet read Answerer tell (aiSenseReq 4)');
   seeker.player.skills.perception.lvl = 4;
   assert(canReadIntent(seeker.player, 'answerer'), 'perception 4 should read Answerer tell (aiSenseReq 4)');
+});
+
+console.log('# fire.js: deterministic fire/hazard field');
+test('igniteAt refuses water/road and blocked tiles, succeeds on open floor', () => {
+  const w = makeWorld(1);
+  igniteAt(w, 16, 6); // a road/current column tile
+  assert(!w.hazards.fire['16,6'], 'ignited a water/road tile');
+  igniteAt(w, 2, 2); // inside the reef-west structure footprint
+  assert(!w.hazards.fire['2,2'], 'ignited a blocked/structure tile');
+  igniteAt(w, 8, 6); // open floor, well away from any structure/road
+  assert(w.hazards.fire['8,6'], 'failed to ignite an open floor tile');
+  assertEqual(w.hazards.fire['8,6'].fuel, FIRE_FUEL_TICKS, 'fresh ignition should start at full fuel');
+});
+test('stepFire is deterministic: same seed + same starting fire => identical fire-tile sets', () => {
+  const w1 = makeWorld(42); igniteAt(w1, 8, 6);
+  const w2 = makeWorld(42); igniteAt(w2, 8, 6);
+  for (let i = 0; i < 10; i++) { stepFire(w1); stepFire(w2); }
+  assertEqual(Object.keys(w1.hazards.fire).sort().join('|'), Object.keys(w2.hazards.fire).sort().join('|'),
+    'two identically-seeded runs produced different fire spread — the cellular automaton is not deterministic');
+});
+test('a fire tile\'s fuel eventually reaches 0 and it is removed', () => {
+  const w = makeWorld(1);
+  // Surround on all 4 sides so it cannot spread — purely testing decay.
+  w.region.blocked = { ...w.region.blocked, '8,5': 100, '9,6': 100, '8,7': 100, '7,6': 100 };
+  igniteAt(w, 8, 6);
+  assert(w.hazards.fire['8,6'], 'ignition failed');
+  for (let i = 0; i < FIRE_FUEL_TICKS; i++) stepFire(w);
+  assert(!w.hazards.fire['8,6'], 'fire tile did not burn out after FIRE_FUEL_TICKS steps');
+});
+test('fire never spreads onto or persists on a water/road tile', () => {
+  const w = makeWorld(1);
+  igniteAt(w, 15, 6); // adjacent to the x=16 current column
+  assert(w.hazards.fire['15,6'], 'ignition failed');
+  for (let i = 0; i < 30; i++) stepFire(w);
+  assert(!w.hazards.fire['16,6'], 'fire spread onto a road/water tile');
+});
+
+console.log('# molotov-throwing enemies (igniter kind) + bottle flight/landing');
+test('an igniter enemy in range and off cooldown throws a bottle at the player', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
+  e.throwCooldown = 0;
+  const kind = CONTENT.enemyKinds.igniter;
+  w.player.x = e.x + 3; w.player.y = e.y; // within aggro(4) and throwRange(6), not adjacent
+  assertEqual(Object.keys(w.hazards.bottles).length, 0, 'a bottle already existed before any TICK');
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'chase', 'igniter did not notice the player within aggro');
+  assertEqual(Object.keys(w.hazards.bottles).length, 1, 'igniter did not throw exactly one bottle');
+  assertEqual(w.enemies.testigniter.throwCooldown, kind.throwCooldownTicks, 'throwCooldown not set to the full cooldown after throwing');
+});
+test('a landed bottle ignites its target tile; a bottle landing on water does not ignite', () => {
+  const w = makeWorld(1);
+  w.hazards.bottles.testbottle = { x0: 8, y0: 6, x1: 8, y1: 7, startTick: w.tick, travelTicks: 2 };
+  reduce(w, { type: 'TICK' }); // elapsed 1 < travelTicks 2 — still flying
+  assert(!w.hazards.fire['8,7'], 'bottle ignited its target before travel time elapsed');
+  assert(w.hazards.bottles.testbottle, 'bottle removed before it actually landed');
+  reduce(w, { type: 'TICK' }); // elapsed 2 >= travelTicks 2 — lands
+  assert(w.hazards.fire['8,7'], 'landed bottle did not ignite its target tile');
+  assert(!w.hazards.bottles.testbottle, 'landed bottle was not removed from state.hazards.bottles');
+
+  const w2 = makeWorld(1);
+  w2.hazards.bottles.testbottle2 = { x0: 15, y0: 6, x1: 16, y1: 6, startTick: w2.tick, travelTicks: 1 };
+  reduce(w2, { type: 'TICK' }); // elapsed 1 >= travelTicks 1 — lands on a road/water tile
+  assert(!w2.hazards.fire['16,6'], 'a bottle landing on a water/road tile ignited it');
+});
+
+console.log('# player burn: catching fire, residual burn, extinguishing');
+test('standing in fire damages the player each tick and sets onFireTicks', () => {
+  const w = makeWorld(1);
+  w.player.x = 8; w.player.y = 6;
+  igniteAt(w, 8, 6);
+  const hpBefore = w.player.hp;
+  reduce(w, { type: 'TICK' });
+  assert(w.player.hp < hpBefore, 'standing in fire did not damage the player');
+  assert(w.player.onFireTicks > 0, 'onFireTicks not set while standing in fire');
+});
+test('after leaving the fire, smaller residual damage continues for a bounded window then stops', () => {
+  const w = makeWorld(1);
+  w.player.x = 8; w.player.y = 6;
+  igniteAt(w, 8, 6);
+  reduce(w, { type: 'TICK' }); // catches fire
+  assert(w.player.onFireTicks > 0, 'player never caught fire');
+  // Move off the burning tile onto plain open floor, far enough that this
+  // short test can't be flakily reached by fire spread.
+  w.player.x = 2; w.player.y = 6;
+  assert(!isWater(w, 2, 6), 'test tile is unexpectedly water/road');
+  let residualDamageTicks = 0;
+  let guard = 0;
+  while (w.player.onFireTicks > 0 && guard++ < 20) {
+    const hpBefore = w.player.hp;
+    reduce(w, { type: 'TICK' });
+    if (w.player.hp < hpBefore) residualDamageTicks++;
+  }
+  assert(residualDamageTicks > 0, 'no residual burn damage was dealt after leaving the fire');
+  assertEqual(w.player.onFireTicks, 0, 'onFireTicks never reached 0');
+  const hpAfterResidual = w.player.hp;
+  reduce(w, { type: 'TICK' }); // one more tick — must be silent now
+  assertEqual(w.player.hp, hpAfterResidual, 'burn damage continued after onFireTicks reached 0');
+});
+test('standing on a water/road tile while on fire extinguishes immediately with no damage that tick', () => {
+  const w = makeWorld(1);
+  w.player.x = 8; w.player.y = 6;
+  igniteAt(w, 8, 6);
+  reduce(w, { type: 'TICK' }); // catches fire
+  assert(w.player.onFireTicks > 0, 'player never caught fire');
+  w.player.x = 16; w.player.y = 4; // on the x=16 current column, not on the burning tile
+  const hpBefore = w.player.hp;
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.player.onFireTicks, 0, 'standing on water/current did not extinguish the player');
+  assertEqual(w.player.hp, hpBefore, 'the extinguishing tick dealt damage — should be silent');
+});
+test('while on fire, light.sources[player-burning] exists and follows the player; it clears once extinguished', () => {
+  const w = makeWorld(1);
+  w.player.x = 8; w.player.y = 6;
+  igniteAt(w, 8, 6);
+  reduce(w, { type: 'TICK' });
+  assert(w.light.sources['player-burning'], 'burning light source not created while on fire');
+  assertEqual(w.light.sources['player-burning'].x, 8, 'burning light did not sit on the player');
+  w.player.x = 2; w.player.y = 6;
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.light.sources['player-burning'].x, 2, 'burning light did not follow the player to their new tile');
+  let guard = 0;
+  while (w.player.onFireTicks > 0 && guard++ < 20) reduce(w, { type: 'TICK' });
+  assert(!w.light.sources['player-burning'], 'burning light source was not removed once onFireTicks reached 0');
+});
+
+console.log('# aura-charge-emits-light');
+test('CHARGE sets a light source scaling with aura %, cleaned up after CHARGE_LIGHT_TTL idle ticks', () => {
+  const w = makeWorld(1);
+  reduce(w, { type: 'CHARGE', start: true });
+  assert(w.light.sources['player-charge'], 'CHARGE did not create a light source');
+  const r1 = w.light.sources['player-charge'].radius, s1 = w.light.sources['player-charge'].strength;
+  for (let i = 0; i < 10; i++) reduce(w, { type: 'CHARGE' });
+  const r2 = w.light.sources['player-charge'].radius, s2 = w.light.sources['player-charge'].strength;
+  assert(r2 >= r1 && s2 >= s1, 'charge light did not scale up as aura % rose');
+  reduce(w, { type: 'TICK' });
+  reduce(w, { type: 'TICK' });
+  assert(w.light.sources['player-charge'], 'charge light removed before CHARGE_LIGHT_TTL elapsed');
+  reduce(w, { type: 'TICK' });
+  assert(!w.light.sources['player-charge'], 'charge light was not cleaned up after CHARGE_LIGHT_TTL idle ticks');
+});
+test('a fire-lit (not echo-pinged) enemy is blastable via AURA_BLAST with no PING first', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x, w.player.y - 2);
+  igniteAt(w, e.x, e.y);
+  stepFire(w); // registers the fire light source (fire.js does not recompute)
+  recomputeLight(w);
+  chargeTo(w, 6);
+  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  assert(seen.some((ev) => ev.type === 'enemy_hit'), 'a fire-lit target should be blastable without ever pinging');
 });
 
 console.log('# deterministic BFS pathfinding');

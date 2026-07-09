@@ -72,6 +72,10 @@ export const CONTENT = {
       aggro: 3, hearing: 8, leash: 8, patrolRadius: 3, fleeAt: 30, resumeAt: 45, confidenceGated: true,
     },
     answerer: { name: 'The Answerer', hp: 46, power: 5, senseReq: 3, aiSenseReq: 4, aggro: 4, hearing: 14, leash: 99, patrolRadius: 0 },
+    // Projectile-armed: throws a molotov at range instead of closing in (see
+    // src/sim/ai.js's throwRange branch). throwCooldownTicks paces how often
+    // it can throw once in range.
+    igniter: { name: 'Igniter', hp: 11, power: 1, senseReq: 2, aiSenseReq: 3, aggro: 4, hearing: 6, leash: 6, patrolRadius: 2, confidenceGated: true, throwRange: 6, throwCooldownTicks: 5 },
   },
 
   regions: {
@@ -129,6 +133,14 @@ export const CONTENT = {
         // see reduce.js ACCEPT_QUEST / world.js gatedEnemyIds. A fresh,
         // guaranteed-killable instance, so a free-roam kill can't soft-lock it.
         'shell-elite1': { kind: 'shell', x: 21, y: 14 },
+        // Free-roam (not quest-gated) — deliberately far (chebyshev >= 7) from
+        // both the y=10 main current and every other placed entity, so the
+        // fixed demo script (src/sim/demo.js, which only ever walks y=10 then
+        // straight to a target column) never comes within its hearing/aggro/
+        // throwRange. The molotov mechanic gets dedicated smoke-test coverage
+        // instead of incidental interaction with the golden-replay's quest
+        // chain. Verified against content.js's actual blocked/roads at (13,19).
+        igniter1: { kind: 'igniter', x: 13, y: 19 },
       },
       destructibles: {
         cache1: { x: 14, y: 4, coins: 3 },

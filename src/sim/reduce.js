@@ -22,7 +22,8 @@ import { nextInt } from './rng.js';
 import { isNight } from './daynight.js';
 import { decideEnemyAction, decideCarStep } from './ai.js';
 import { echoDistanceMap, revealSet, heardAt } from './sound.js';
-import { lightAt } from './light.js';
+import { recomputeLight, lightAt } from './light.js';
+import { igniteAt, stepFire, isWater, FIRE_BURN_DMG_BASE, FIRE_BURN_DMG_ROLL } from './fire.js';
 
 const MELEE_RANGE = 1;
 const BLAST_RANGE = 3;
@@ -48,6 +49,13 @@ const ENEMY_SPAWN_DELAY_TICKS = 3;
 const CHARGE_RAMP_STEP = 4;
 const CHARGE_RAMP_CAP = 8;
 const CHARGE_TOP_PCT = 80;
+
+// Fire/molotov hazard tuning (src/sim/fire.js owns the fire field itself).
+const BOTTLE_LIGHT_RADIUS = 2;
+const BOTTLE_LIGHT_STRENGTH = 40;
+const BURN_STATUS_TICKS = 4;   // residual burning duration after leaving flame
+const RESIDUAL_BURN_DMG = 1;
+const CHARGE_LIGHT_TTL = 2;    // world-ticks of no CHARGE command before the charge-light is cleaned up
 
 export function reduce(state, command) {
   const events = reduceCore(state, command);
@@ -97,6 +105,77 @@ function reduceCore(state, command) {
       for (const id of Object.keys(state.cars).sort()) {
         decideCarStep(state, id, claimed);
       }
+
+      // --- hazards: charge-light staleness, bottle flight, fire, burn -------
+      // Charge-light staleness: no CHARGE command in a while, drop the glow.
+      if (state.light.sources['player-charge'] && state.tick - state.player.lastChargeTick > CHARGE_LIGHT_TTL) {
+        delete state.light.sources['player-charge'];
+      }
+
+      // Bottle advance: land (ignite target + fire an event) or update its
+      // in-flight light position. A bottle created earlier THIS tick by
+      // ai.js has elapsed=0, so it gets a light source immediately — no
+      // special-casing needed for brand-new throws.
+      for (const bid of Object.keys(state.hazards.bottles).sort()) {
+        const b = state.hazards.bottles[bid];
+        const elapsed = state.tick - b.startTick;
+        if (elapsed >= b.travelTicks) {
+          delete state.hazards.bottles[bid];
+          delete state.light.sources[`bottle:${bid}`];
+          igniteAt(state, b.x1, b.y1);
+          const targetKey = `${b.x1},${b.y1}`;
+          const ignited = !isWater(state, b.x1, b.y1)
+            && !Object.prototype.hasOwnProperty.call(state.region.blocked, targetKey);
+          events.push({ type: 'bottle_landed', x: b.x1, y: b.y1, ignited });
+        } else {
+          const t = elapsed / b.travelTicks;
+          const bx = Math.round(b.x0 + (b.x1 - b.x0) * t);
+          const by = Math.round(b.y0 + (b.y1 - b.y0) * t);
+          state.light.sources[`bottle:${bid}`] = { x: bx, y: by, radius: BOTTLE_LIGHT_RADIUS, strength: BOTTLE_LIGHT_STRENGTH };
+        }
+      }
+
+      // Fire step: fuel decay + spread (src/sim/fire.js), fixed sorted-key
+      // snapshot order — see that file's header for the determinism story.
+      stepFire(state);
+
+      // Player burn: standing IN fire refreshes the burn timer and deals the
+      // full roll; a residual burn (walked off the tile but still smoldering)
+      // deals a flat smaller tick until it expires; standing on water/current
+      // extinguishes immediately, no damage that tick.
+      const onFireKey = `${state.player.x},${state.player.y}`;
+      const standingInFire = Object.prototype.hasOwnProperty.call(state.hazards.fire, onFireKey);
+      if (standingInFire) {
+        state.player.onFireTicks = BURN_STATUS_TICKS;
+        const dmg = FIRE_BURN_DMG_BASE + nextInt(state.rng, FIRE_BURN_DMG_ROLL);
+        state.player.hp = Math.max(0, state.player.hp - dmg);
+        events.push({ type: 'player_hit', by: 'fire', dmg, hp: state.player.hp });
+        if (state.player.hp === 0) events.push({ type: 'player_defeated' });
+      } else if (state.player.onFireTicks > 0) {
+        if (isWater(state, state.player.x, state.player.y)) {
+          state.player.onFireTicks = 0;
+        } else {
+          state.player.onFireTicks -= 1;
+          const dmg = RESIDUAL_BURN_DMG;
+          state.player.hp = Math.max(0, state.player.hp - dmg);
+          events.push({ type: 'player_hit', by: 'fire', dmg, hp: state.player.hp });
+          if (state.player.hp === 0) events.push({ type: 'player_defeated' });
+        }
+      }
+      // The fire-on-the-player light source follows them every tick they're
+      // still burning — rewritten from the CURRENT position each TICK, not a
+      // fixed point, so it moves with the player exactly like the feature
+      // asks ("the fire on the player acts as a light source").
+      if (state.player.onFireTicks > 0) {
+        state.light.sources['player-burning'] = { x: state.player.x, y: state.player.y, radius: 1, strength: 35 };
+      } else {
+        delete state.light.sources['player-burning'];
+      }
+
+      // One recompute covering every light-source mutation this tick: bottle
+      // positions, fire tiles, player-burning, and any charge-light cleanup.
+      recomputeLight(state);
+
       return events;
     }
 
@@ -221,6 +300,18 @@ function reduceCore(state, command) {
 
       p.aura = Math.min(p.maxAura, p.aura + gain);
       p.chargeHold = hold + 1;
+      // Charging emits light scaling with how full the aura is right now —
+      // the "aura could emit light relative to charge level" request. Radius/
+      // strength both clamp so a maxed-out charge stays a modest glow, not a
+      // room-filling flood (echo pulses remain the primary way to see far).
+      const chargePct = p.maxAura > 0 ? Math.floor((p.aura * 100) / p.maxAura) : 100;
+      state.light.sources['player-charge'] = {
+        x: p.x, y: p.y,
+        radius: Math.min(3, 1 + Math.floor(chargePct / 34)),
+        strength: Math.min(70, 20 + Math.floor(chargePct / 2)),
+      };
+      p.lastChargeTick = state.tick;
+      recomputeLight(state);
       return [{ type: 'charged', aura: p.aura, gain }];
     }
 
