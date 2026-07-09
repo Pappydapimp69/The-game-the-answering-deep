@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>The Waiting City</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #05070f; }
+    /* Fill the whole field of view — the JS sizes the backing store to the
+       viewport (× DPR); CSS just stretches it edge to edge.
+       100vh/100vw size to the LARGEST possible mobile-browser viewport (chrome
+       collapsed) — on a real phone the visible area is smaller whenever the
+       address/tab bar is showing, so a canvas CSS-boxed to 100vh extends below
+       the actual fold, pushing anything anchored near the bottom (the on-screen
+       touch controls) off screen. 100dvh/100dvw track the ACTUAL visible
+       viewport dynamically; declared after vh/vw as a progressive enhancement
+       (a browser that doesn't recognize dvh/dvw ignores that declaration and
+       keeps the vh/vw fallback, rather than breaking). */
+    #game { display: block; width: 100vw; height: 100vh; width: 100dvw; height: 100dvh; touch-action: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script type="module" src="src/main.js?v=20260708-1"></script>
+</body>
+</html>
