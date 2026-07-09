@@ -97,12 +97,18 @@ export const CONTENT = {
     //   - `harmless`: never melee-strikes the player even if cornered
     //     (game.js's real-time proximity auto-attack skips this kind) — it
     //     only ever hurts you at range, with fire, defensively.
-    //   - a per-INSTANCE `role: 'flashbang'` (set on the enemy placement in a
-    //     region's `enemies`, not here on the kind) swaps what it throws —
-    //     see ai.js's decideLightAverseAction — from a molotov to a flash
-    //     bottle (armed 3s, then a proximity-scaled screen whiteout instead
-    //     of fire) without needing a whole separate content kind for one
-    //     behavioral variant of the same creature.
+    //   - a per-INSTANCE `role` (set on the enemy placement in a region's
+    //     `enemies`, not here on the kind — see ai.js's
+    //     decideLightAverseAction) swaps in a behavioral variant without
+    //     needing a whole separate content kind per variant:
+    //       'flashbang' — throws a flash bottle instead of a molotov (armed
+    //         3s, then a proximity-scaled screen whiteout instead of fire).
+    //       'guardian' — never goes 'curious' (never approaches/hunts); it
+    //         only ever reacts (flee/throw) if actually revealed close,
+    //         otherwise just holds its post.
+    //       'quencher' — never throws or attacks; rushes to extinguish the
+    //         nearest unguarded lit torch, otherwise keeps its distance.
+    //         Runs an entirely separate decision function (decideQuencherAction).
     igniter: {
       name: 'Igniter', hp: 11, power: 1, senseReq: 2, aiSenseReq: 3,
       aggro: 4, keepAway: 3, hearing: 6, leash: 6, patrolRadius: 2,
@@ -168,12 +174,17 @@ export const CONTENT = {
       // hunts introduce the Igniter's hide-and-seek machine. igniter-elite1
       // carries `role: 'flashbang'` (see content.js's igniter kind comment
       // and ai.js) — the finale encounter escalates from "throws fire" to
-      // "throws a blinding flash", not just a bigger health bar.
+      // "throws a blinding flash", not just a bigger health bar. quencher1
+      // (role: 'quencher', 'guard-the-flame' quest) and igniter-guardian1
+      // (role: 'guardian', standing next to the chorus shard it guards) are
+      // both the same underlying Igniter kind, wearing a different role.
       enemies: {
         lurker1: { kind: 'lurker', x: 13, y: 19 },       // learn-to-listen
         shell1: { kind: 'shell', x: 21, y: 15 },          // the-fleeing-kind
         igniter1: { kind: 'igniter', x: 26, y: 7 },       // the-burning-kind
         'igniter-elite1': { kind: 'igniter', x: 21, y: 14, role: 'flashbang' }, // sound-the-deep finale
+        quencher1: { kind: 'igniter', x: 20, y: 12, role: 'quencher' }, // guard-the-flame
+        'igniter-guardian1': { kind: 'igniter', x: 29, y: 15, role: 'guardian' }, // stands by chorusshard1
       },
       destructibles: {
         cache1: { x: 14, y: 4, coins: 3 },
@@ -203,13 +214,18 @@ export const CONTENT = {
       // reduce.js's LIGHT_TORCH case), permanent once lit. Fairly strong
       // (radius/strength) since their whole purpose is shrinking an
       // Igniter's viable dark ground during a hunt — see ai.js's
-      // LIGHT_IDLE_THRESHOLD, which reads this same field. One near shell1
-      // (the-fleeing-kind) and one near igniter1 (the-burning-kind, the
-      // player's first real Igniter hunt) so lighting one is a real, useful
-      // tactic, not just atmosphere.
+      // LIGHT_IDLE_THRESHOLD, which reads this same field. torch1/torch2 sit
+      // near shell1 (the-fleeing-kind) and igniter1 (the-burning-kind) so
+      // lighting one is a real, useful tactic, not just atmosphere; both are
+      // also the two 'guard-the-flame' objectives (a quencher tries to snuff
+      // them back out). torch-marrow is a THIRD torch, right beside Marrow's
+      // post — it starts unlit and reduce.js's TALK case lights it
+      // automatically, once, the first time the player talks to him, so the
+      // mechanic gets introduced through a dialog beat rather than a manual.
       torches: {
         torch1: { x: 19, y: 15, radius: 4, strength: 65 },
         torch2: { x: 23, y: 8, radius: 4, strength: 65 },
+        'torch-marrow': { x: 20, y: 9, radius: 4, strength: 65 },
       },
       boss: { id: 'answerer1', kind: 'answerer', x: 29, y: 9 },
     },
@@ -301,6 +317,20 @@ export const CONTENT = {
       reward: { coins: 5 },
       unlocks: { enemies: ['igniter1'] },
     },
+    // A third, optional branch off 'learn-to-listen' — not required by
+    // anything downstream (the-sounding-line's requiresAny only ever checks
+    // the-fleeing-kind/the-burning-kind), so it's a pure side quest: light
+    // both torches while a quencher-role Igniter (quencher1) rushes to snuff
+    // whichever one you're not standing near. Defeating it was never the
+    // point — the objectives only ever check the torches themselves.
+    'guard-the-flame': {
+      name: 'Guard the Flame',
+      giver: 'wren',
+      requires: ['learn-to-listen'],
+      objectives: [{ type: 'light', torchId: 'torch1' }, { type: 'light', torchId: 'torch2' }],
+      reward: { coins: 6 },
+      unlocks: { enemies: ['quencher1'] },
+    },
     'the-sounding-line': {
       name: 'The Sounding Line',
       giver: 'wren',
@@ -322,7 +352,7 @@ export const CONTENT = {
         { type: 'reach', zone: 'the-hollow' },
       ],
       reward: { coins: 16 },
-      unlocks: { enemies: ['igniter-elite1'], pickups: ['chorusshard1'] },
+      unlocks: { enemies: ['igniter-elite1', 'igniter-guardian1'], pickups: ['chorusshard1'] },
     },
   },
 };

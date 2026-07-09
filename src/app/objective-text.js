@@ -11,5 +11,9 @@ export function describeObjective(o) {
   }
   if (o.type === 'collect') return `Find the ${o.item.replace(/-/g, ' ')}`;
   if (o.type === 'reach') return `Reach the ${o.zone.replace(/-/g, ' ')}`;
+  if (o.type === 'light') {
+    const label = o.torchId === 'torch1' ? 'the southern torch' : o.torchId === 'torch2' ? 'the northern torch' : `the ${o.torchId.replace(/-/g, ' ')}`;
+    return `Light ${label}`;
+  }
   throw new Error(`describeObjective: unknown objective type ${o.type}`);
 }

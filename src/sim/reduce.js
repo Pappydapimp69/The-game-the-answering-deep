@@ -261,6 +261,14 @@ function reduceCore(state, command) {
         for (const qid of offerable) state.quests.offered[qid] = 1;
         events.push({ type: 'quests_offered', quests: offerable });
       }
+      // Sneaking the torch mechanic into a dialog beat rather than a manual:
+      // the first time the player talks to Marrow, the trainer lights the
+      // post-torch beside them, unprompted — teaching "torches exist and
+      // stay lit" experientially instead of a tutorial pop-up. One-time by
+      // construction: a torch that's already lit never re-triggers this.
+      if (command.npcId === 'marrow' && state.torches['torch-marrow'] && !state.torches['torch-marrow'].lit) {
+        igniteTorch(state, events, 'torch-marrow', { auto: true });
+      }
       return events;
     }
 
@@ -309,15 +317,8 @@ function reduceCore(state, command) {
       if (!t) throw new Error(`LIGHT_TORCH: no torch ${command.torchId}`);
       if (t.lit) return [{ type: 'nothing_there', target: command.torchId }];
       if (dist(state.player, t) > 1) return [{ type: 'too_far', target: command.torchId }];
-      t.lit = 1;
-      state.light.sources[`torch:${command.torchId}`] = { x: t.x, y: t.y, radius: t.radius, strength: t.strength };
-      recomputeLight(state);
-      // Striking a torch to life is loud and bright, same as a pulse — it
-      // reveals the area around it (echo.lit) and alerts anything within
-      // earshot, which is exactly what makes lighting one a real, weighable
-      // decision for a hunt rather than a free, silent switch-flip.
-      const events = [{ type: 'torch_lit', target: command.torchId }];
-      events.push(...applyPing(state, t.x, t.y, true));
+      const events = [];
+      igniteTorch(state, events, command.torchId);
       return events;
     }
 
@@ -473,6 +474,25 @@ export function replay(state, commands) {
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function dist(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
 
+// Shared by the player-initiated LIGHT_TORCH command and Marrow's scripted
+// one-time auto-light (TALK case) — one place owns "what actually happens
+// when a torch catches", so the two callers can't drift apart. Striking a
+// torch to life is loud and bright, same as a pulse — it reveals the area
+// around it (echo.lit) and alerts anything within earshot, which is exactly
+// what makes lighting one a real, weighable decision during a hunt rather
+// than a free, silent switch-flip. `opts.auto` just tags the event so the
+// presentation layer can show Marrow's scripted line instead of a generic
+// "torch lit" toast; it changes no sim behavior.
+function igniteTorch(state, events, torchId, opts = {}) {
+  const t = state.torches[torchId];
+  t.lit = 1;
+  state.light.sources[`torch:${torchId}`] = { x: t.x, y: t.y, radius: t.radius, strength: t.strength };
+  recomputeLight(state);
+  events.push({ type: 'torch_lit', target: torchId, auto: !!opts.auto });
+  events.push(...applyPing(state, t.x, t.y, true));
+  questProgress(state, events, 'light', torchId);
+}
+
 // A tile is "lit" (drawable / targetable) if a pulse touched it within the
 // reveal window OR a persistent light source currently reaches it — two
 // modalities, either one sufficient. state.echo.lit only ever holds
@@ -607,7 +627,7 @@ function questProgress(state, events, type, target) {
         else if (obj.type === 'reach') {
           const z = state.region.zones[obj.zone];
           match = !!z && Math.max(Math.abs(state.player.x - z.x), Math.abs(state.player.y - z.y)) <= z.r;
-        }
+        } else if (obj.type === 'light') match = obj.torchId === target;
         if (match && st.progress[i] < need) {
           st.progress[i] += 1;
           events.push({ type: 'objective_progress', quest: qId, objective: i, at: st.progress[i], of: need });

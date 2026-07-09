@@ -23,6 +23,7 @@ import { render, COLORS } from './renderer.js';
 import { saveGame, clearSave } from './save.js';
 import { nightAmount } from './daynight-tint.js';
 import { flashOpacity } from './flash-decay.js';
+import { wrenDialogFor } from './quest-dialog.js';
 import { makeAudio } from './audio.js';
 import { makeBindingsUI } from './bindings-ui.js';
 
@@ -146,7 +147,10 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     switch (e.type) {
       case 'talked': {
         const npc = world.npcs[e.npc];
-        const lines = CONTENT.regions[world.region.id].npcs[e.npc]?.dialog || [];
+        // Wren's lines are state-aware (see quest-dialog.js) — every other
+        // NPC keeps a flat, always-the-same array (Marrow is a shop keeper
+        // giving the same lesson regardless of quest progress; that's fine).
+        const lines = e.npc === 'wren' ? wrenDialogFor(world) : (CONTENT.regions[world.region.id].npcs[e.npc]?.dialog || []);
         if (npc.shop && npc.shop.length) {
           const itemId = npc.shop[0];
           view.modal = mkModal('shop', npc.name, shopLines(lines, itemId),
@@ -163,9 +167,18 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
         break;
       }
       case 'quests_offered': {
+        // Wren is the only quest giver (see content.js's quest-design note),
+        // so her state-aware lines (quest-dialog.js) always apply here too —
+        // this event fires in the SAME 'talked' TALK dispatch and previously
+        // just silently overwrote view.modal with an empty-lines offer
+        // modal, so the freshly-computed dialog text was set one line above
+        // and immediately discarded without ever being shown. Folding the
+        // lines into the offer modal itself is the fix — the offer becomes
+        // "what Wren just said" plus the actual choices, not two competing
+        // modals where only the last write wins.
         const options = e.quests.map((qid) => ({ id: qid, label: world.quests.defs[qid].name }));
         options.push({ id: 'notnow', label: 'Not now' });
-        view.modal = mkModal('offer', 'Wren', [], options);
+        view.modal = mkModal('offer', 'Wren', wrenDialogFor(world), options);
         break;
       }
       case 'enemy_incoming': toast(`Something ${kindName(e.kind)}-shaped stirs in the dark.`); audio.play('quest'); break;
@@ -185,6 +198,7 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
         if (e.target === world.arc.bossDef.id) {
           view.modal = mkModal('fate', 'The Answerer falls silent',
             ['It stops, mid-echo. The voice it stole is yours to end — or to make real.',
+             'Silence it, and the reach goes quiet again, the way it always should have been. Answer it, and something down here can be spoken to from now on — by you, or by whatever comes after you.',
              'Do you silence it, or answer it?'],
             [{ id: 'silence', label: 'Silence it' }, { id: 'answer', label: 'Answer it' }]);
         }
@@ -200,6 +214,11 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       case 'quest_completed': toast(`Quest complete! +${e.reward.coins} coins`); audio.play('quest'); break;
       case 'healed': toast(`Recovered — HP ${e.hp}`); audio.play('heal'); break;
       case 'bought': toast(`Bought — ${e.coins} coins left`); break;
+      case 'torch_lit':
+        if (e.auto) toast('Marrow strikes the old post-torch to life. "There — small mercy, but it stays."');
+        else toast('Torch lit — the dark opens up around it.');
+        audio.play('quest');
+        break;
       case 'no_aura': toast('Not enough aura — Charge first'); break;
       case 'too_far': toast('Too far away'); break;
       case 'unlit': toast('You can’t place it — pulse to see it first'); break;

@@ -116,7 +116,7 @@ export function validateContent(c) {
   for (const [qid, q] of Object.entries(c.quests || {})) {
     if (!Array.isArray(q.objectives) || !q.objectives.length) err(`quest ${qid}: no objectives`);
     for (const [i, o] of (q.objectives || []).entries()) {
-      if (!['kill', 'collect', 'reach'].includes(o.type)) err(`quest ${qid}#${i}: unknown objective type ${o.type}`);
+      if (!['kill', 'collect', 'reach', 'light'].includes(o.type)) err(`quest ${qid}#${i}: unknown objective type ${o.type}`);
       if (o.n !== undefined && (!isInt(o.n) || o.n < 1)) err(`quest ${qid}#${i}: bad n`);
     }
     if (!q.reward || !isInt(q.reward.coins) || q.reward.coins < 0) err(`quest ${qid}: bad reward`);
@@ -170,7 +170,7 @@ export function validateContent(c) {
       // `role` is a per-INSTANCE behavior variant (ai.js), not a per-kind
       // field — only 'flashbang' is defined so far (a lightAverse thrower
       // that lobs a flash bottle instead of a molotov).
-      if (e.role !== undefined && e.role !== 'flashbang') err(`enemy ${id}: unknown role ${e.role}`);
+      if (e.role !== undefined && !['flashbang', 'guardian', 'quencher'].includes(e.role)) err(`enemy ${id}: unknown role ${e.role}`);
     }
     for (const [id, p] of Object.entries(r.pickups || {})) {
       if (!c.items?.[p.item]) err(`pickup ${id}: unknown item ${p.item}`);
@@ -215,6 +215,13 @@ export function validateContent(c) {
           if (r.zones?.[o.zone]) exists = true;
         }
         if (!exists) err(`quest ${qid}#${i}: zone ${o.zone} does not exist`);
+      }
+      if (o.type === 'light') {
+        let exists = false;
+        for (const r of Object.values(c.regions || {})) {
+          if (r.torches?.[o.torchId]) exists = true;
+        }
+        if (!exists) err(`quest ${qid}#${i}: torch ${o.torchId} does not exist`);
       }
     }
   }

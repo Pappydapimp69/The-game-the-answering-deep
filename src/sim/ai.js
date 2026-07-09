@@ -167,6 +167,12 @@ function decideLightAverseAction(state, id, e, kind, player, distToPlayer, distF
   // many ticks happened to pass revealed vs not.
   if (e.throwCooldown > 0) e.throwCooldown -= 1;
 
+  // `role: 'quencher'` (a per-INSTANCE variant, see content.js) runs its own
+  // wholly separate decision function — a saboteur, not a hunter or a
+  // hunted thing: it never throws or attacks, it rushes to snuff out lit
+  // torches left unguarded, and otherwise just keeps its distance.
+  if (e.role === 'quencher') { decideQuencherAction(state, id, e, player, distToPlayer, claimed); return; }
+
   const revealed = Object.prototype.hasOwnProperty.call(state.echo.lit, `${e.x},${e.y}`);
   let next;
   if (revealed) {
@@ -194,7 +200,11 @@ function decideLightAverseAction(state, id, e, kind, player, distToPlayer, distF
     // state for this kind) but distance-from-the-player it needs before
     // it's willing to calm back down.
     next = distToPlayer > kind.leash ? 'lurk' : 'flee';
-  } else if (distToPlayer <= kind.aggro) {
+  } else if (distToPlayer <= kind.aggro && e.role !== 'guardian') {
+    // `role: 'guardian'` never goes curious — it doesn't hunt, it just
+    // stands its post (still lurking/dark-preferring exactly like any other
+    // lightAverse kind) and only reacts (flee/throw) if actually revealed
+    // close, same as the rest of this function below.
     next = 'curious';
   } else {
     next = 'lurk';
@@ -233,6 +243,60 @@ function decideLightAverseAction(state, id, e, kind, player, distToPlayer, distF
   if (!step && lightAt(state, e.x, e.y) > LIGHT_IDLE_THRESHOLD) {
     step = pickDarkestOpenNeighbor(state, e.x, e.y, claimed);
   }
+  commitMove(id, e, step, claimed);
+}
+
+// How close the player must get (or a fresh reveal) before a quencher drops
+// whatever it's doing and runs — "that enemy... always flees", never fights.
+const QUENCHER_KEEPAWAY = 4;
+// How close the PLAYER must be to a lit torch before a quencher considers it
+// "guarded" and won't risk walking up to it — keeps it from suicidally
+// approaching a torch the player is standing right next to.
+const QUENCHER_GUARD_DIST = 3;
+
+// A pure saboteur, not a fighter — never throws, never attacks (harmless is
+// already true at the kind level). Rushes to extinguish the nearest LIT
+// torch that isn't currently guarded by player proximity; otherwise just
+// keeps QUENCHER_KEEPAWAY between itself and the player, same dark-biased
+// flee step every other light-averse kind uses.
+function decideQuencherAction(state, id, e, player, distToPlayer, claimed) {
+  const revealed = Object.prototype.hasOwnProperty.call(state.echo.lit, `${e.x},${e.y}`);
+  let next, step = null;
+  if (revealed || distToPlayer < QUENCHER_KEEPAWAY) {
+    next = 'flee';
+    step = stepAwayFromDark(state, e.x, e.y, player.x, player.y, claimed);
+  } else {
+    let target = null, bestDist = Infinity;
+    for (const tid of Object.keys(state.torches).sort()) {
+      const t = state.torches[tid];
+      if (!t.lit || chebyshev(player, t) <= QUENCHER_GUARD_DIST) continue;
+      const d = chebyshev(e, t);
+      if (d < bestDist) { bestDist = d; target = { id: tid, x: t.x, y: t.y }; }
+    }
+    if (target) {
+      next = 'chase'; // reads as "closing in" via info.js's AI_LABELS — closing in on the torch
+      if (chebyshev(e, target) <= 1) {
+        delete state.light.sources[`torch:${target.id}`];
+        state.torches[target.id].lit = 0;
+      } else {
+        step = bfsNextStep(state, e.x, e.y, target.x, target.y, claimed);
+      }
+    } else {
+      // Nothing worth doing and safely far — wander like any lurking kind
+      // (same fixed roll count, unbounded by a home radius since its job is
+      // to range across every torch on the map, not guard one spot).
+      next = 'patrol';
+      const moveRoll = nextInt(state.rng, 4);
+      const dirRoll = nextInt(state.rng, 4);
+      if (moveRoll > 0) {
+        const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+        const [dx, dy] = dirs[dirRoll];
+        const nx = e.x + dx, ny = e.y + dy;
+        if (isOpenTile(state, nx, ny, claimed)) step = { x: nx, y: ny };
+      }
+    }
+  }
+  if (next !== e.aiState) { e.aiState = next; e.stateTicks = 0; } else e.stateTicks += 1;
   commitMove(id, e, step, claimed);
 }
 

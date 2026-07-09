@@ -27,7 +27,7 @@ import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS, GEN_MAX_CHILDREN } from '
 import { ENEMY_SPRITES, NPC_SPRITES } from '../src/app/sprites.js';
 import { flashOpacity } from '../src/app/flash-decay.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '242df650';
+const GOLDEN_DEMO_FINGERPRINT = '04169835';
 
 const failures = [];
 let count = 0;
@@ -141,6 +141,8 @@ test('deliberate content corruptions fail the build, not the player', () => {
   assert(corrupt((c) => { c.regions['the-drowned-reach'].blocked['2,2'] = 200; }), 'out-of-range opacity passed');
   assert(corrupt((c) => { delete c.regions['the-drowned-reach'].zones['the-hollow']; }), 'missing the-hollow passed');
   assert(corrupt((c) => { c.quests['the-sounding-line'].objectives[0].type = 'bogus'; }), 'unknown objective type passed');
+  assert(corrupt((c) => { c.quests['guard-the-flame'].objectives[0].torchId = 'nonexistent'; }), 'a "light" objective referencing an unknown torch passed');
+  assert(corrupt((c) => { c.regions['the-drowned-reach'].enemies.quencher1.role = 'bogus'; }), 'an unknown enemy role passed');
   // A cycle reachable only through a quest's SECOND (or later) requires entry.
   assert(corrupt((c) => {
     c.quests['learn-to-listen'].requires = ['into-the-dark', 'sound-the-deep'];
@@ -208,7 +210,7 @@ console.log('# quest chain: a real branch (requiresAny), not a straight line');
 // Tickless combat (moveAdjacent/MELEE never TICKs) keeps a light-averse
 // Igniter parked at its spawn throughout — same trick the demo uses. Lurker
 // and Shell (standard chase/attack machine) never move off-script either way.
-test('completing learn-to-listen offers BOTH the-fleeing-kind and the-burning-kind at once', () => {
+test('completing learn-to-listen offers the-fleeing-kind, the-burning-kind, AND guard-the-flame at once', () => {
   const w = makeWorld(1);
   talkAndAccept(w, 'wren', 'into-the-dark');
   moveAdjacent(w, { x: 20, y: 10 });
@@ -219,7 +221,7 @@ test('completing learn-to-listen offers BOTH the-fleeing-kind and the-burning-ki
   moveAdjacent(w, w.npcs.wren);
   const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
   const offered = ev.find((e) => e.type === 'quests_offered');
-  assertEqual(offered.quests.join(','), 'the-burning-kind,the-fleeing-kind', 'both branch quests should be offered together');
+  assertEqual(offered.quests.join(','), 'guard-the-flame,the-burning-kind,the-fleeing-kind', 'all three branch quests should be offered together');
 });
 test('the-sounding-line is offered once EITHER branch completes, not requiring both', () => {
   const w = makeWorld(1);
@@ -245,16 +247,18 @@ test('the-sounding-line is offered once EITHER branch completes, not requiring b
 });
 
 console.log('# gated enemies/pickups still agnostic of prior actions');
-test('igniter-elite1/chorusshard1 do not exist before the finale quest is accepted', () => {
+test('igniter-elite1/igniter-guardian1/chorusshard1 do not exist before the finale quest is accepted', () => {
   const fresh = makeWorld(1);
   assert(!fresh.enemies['igniter-elite1'], 'gated enemy pre-spawned');
+  assert(!fresh.enemies['igniter-guardian1'], 'gated guardian pre-spawned');
   assert(!fresh.pickups.chorusshard1, 'gated pickup pre-spawned');
 });
-test('lurker1/shell1/igniter1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
+test('lurker1/shell1/igniter1/quencher1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
   const fresh = makeWorld(1);
   assert(!fresh.enemies.lurker1, 'lurker1 pre-spawned — killable before learn-to-listen is accepted');
   assert(!fresh.enemies.shell1, 'shell1 pre-spawned — killable before the-fleeing-kind is accepted');
   assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before the-burning-kind is accepted');
+  assert(!fresh.enemies.quencher1, 'quencher1 pre-spawned — killable before guard-the-flame is accepted');
   assert(!fresh.pickups.soundingline1, 'soundingline1 pre-spawned — collectable before the-sounding-line is accepted');
 });
 test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not instant-spawn', () => {
@@ -270,10 +274,28 @@ test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not ins
   let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
   assert(w.enemies.lurker1 && w.enemies.lurker1.alive === 1, 'lurker1 never actually appeared after its delay');
 });
-test('igniter-elite1 (finale) carries role: flashbang', () => {
+test('igniter-elite1 (finale) carries role: flashbang; igniter-guardian1 carries role: guardian', () => {
   const w = makeWorld(1);
   assertEqual(w.quests.defs['sound-the-deep'].unlocks.enemies['igniter-elite1'].role, 'flashbang',
     'igniter-elite1 lost its flashbang role in the quest-def snapshot');
+  assertEqual(w.quests.defs['sound-the-deep'].unlocks.enemies['igniter-guardian1'].role, 'guardian',
+    'igniter-guardian1 lost its guardian role in the quest-def snapshot');
+});
+test('guard-the-flame is offered alongside the other learn-to-listen branches and unlocks quencher1 with role: quencher', () => {
+  const w = makeWorld(1);
+  assertEqual(w.quests.defs['guard-the-flame'].unlocks.enemies.quencher1.role, 'quencher',
+    'quencher1 lost its quencher role in the quest-def snapshot');
+  talkAndAccept(w, 'wren', 'into-the-dark');
+  moveAdjacent(w, { x: 20, y: 10 });
+  talkAndAccept(w, 'wren', 'learn-to-listen');
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
+  moveAdjacent(w, w.npcs.wren);
+  reduce(w, { type: 'TALK', npcId: 'wren' });
+  reduce(w, { type: 'ACCEPT_QUEST', questId: 'guard-the-flame' });
+  g = 0; while (!w.enemies.quencher1 && g++ < 10) reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.quencher1.kind, 'igniter', 'quencher1 should be an Igniter wearing a role, not a new kind');
 });
 
 // Regular enemies are quest-gated now — don't exist off a bare makeWorld().
@@ -567,6 +589,91 @@ test('lighting a torch is loud: it reveals the area and can startle a light-aver
   assert(Object.prototype.hasOwnProperty.call(w.echo.lit, `${e.x},${e.y}`), 'igniting a torch should echo-reveal a creature standing nearby');
   reduce(w, { type: 'TICK' });
   assertEqual(w.enemies.testigniter.aiState, 'flee', 'a creature revealed by a torch\'s ignition should react exactly like a pulse reveal');
+});
+test('Marrow lights his own post-torch, once, automatically, the first time he\'s talked to', () => {
+  const w = makeWorld(1);
+  assertEqual(w.torches['torch-marrow'].lit, 0, 'torch-marrow should start unlit');
+  moveAdjacent(w, w.npcs.marrow);
+  const ev = reduce(w, { type: 'TALK', npcId: 'marrow' });
+  assert(ev.some((e) => e.type === 'torch_lit' && e.target === 'torch-marrow' && e.auto), 'talking to Marrow should auto-light torch-marrow (auto: true)');
+  assertEqual(w.torches['torch-marrow'].lit, 1, 'torch-marrow should now be lit');
+  const again = reduce(w, { type: 'TALK', npcId: 'marrow' });
+  assert(!again.some((e) => e.type === 'torch_lit'), 'a second talk to Marrow should not re-trigger the auto-light');
+});
+test('a LIGHT_TORCH-lit torch advances a matching "light" quest objective', () => {
+  const w = makeWorld(1);
+  talkAndAccept(w, 'wren', 'into-the-dark');
+  moveAdjacent(w, { x: 20, y: 10 });
+  talkAndAccept(w, 'wren', 'learn-to-listen');
+  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.lurker1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' }); // completes learn-to-listen
+  moveAdjacent(w, w.npcs.wren);
+  reduce(w, { type: 'TALK', npcId: 'wren' }); // offers the-fleeing-kind/the-burning-kind/guard-the-flame
+  reduce(w, { type: 'ACCEPT_QUEST', questId: 'guard-the-flame' });
+  moveAdjacent(w, w.torches.torch1);
+  const ev = reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch1' });
+  assert(ev.some((e) => e.type === 'objective_progress' && e.quest === 'guard-the-flame'), 'lighting torch1 did not progress guard-the-flame');
+  assert(!w.quests.completed['guard-the-flame'], 'guard-the-flame completed after only one of its two torches');
+  moveAdjacent(w, w.torches.torch2);
+  reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch2' });
+  assert(w.quests.completed['guard-the-flame'], 'guard-the-flame never completed after both torches were lit');
+});
+
+console.log('# quencher role: extinguishes unguarded torches, always flees, never fights');
+test('a quencher extinguishes a lit, unguarded torch it reaches', () => {
+  const w = makeWorld(1);
+  w.torches.torch1.lit = 1;
+  w.light.sources['torch:torch1'] = { x: w.torches.torch1.x, y: w.torches.torch1.y, radius: w.torches.torch1.radius, strength: w.torches.torch1.strength };
+  recomputeLight(w);
+  const t = w.torches.torch1;
+  makeTestEnemy(w, 'testquencher', 'igniter', t.x + 1, t.y, { role: 'quencher' });
+  w.player.x = 1; w.player.y = 1; // far from both the quencher and the torch — safely unguarded
+  let guard = 0;
+  while (w.torches.torch1.lit && guard++ < 10) reduce(w, { type: 'TICK' });
+  assertEqual(w.torches.torch1.lit, 0, 'a quencher never extinguished a reachable, unguarded lit torch');
+  assert(!w.light.sources['torch:torch1'], 'an extinguished torch\'s light source was not removed');
+});
+test('a quencher within keepaway of the player flees instead of approaching a guarded torch', () => {
+  const w = makeWorld(1);
+  w.torches.torch1.lit = 1;
+  recomputeLight(w);
+  const t = w.torches.torch1;
+  makeTestEnemy(w, 'testquencher', 'igniter', t.x + 2, t.y, { role: 'quencher' });
+  w.player.x = t.x; w.player.y = t.y; // standing right on the torch, 2 tiles from the quencher (< keepaway)
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.torches.torch1.lit, 1, 'a quencher extinguished a torch the player was standing right next to');
+  assertEqual(w.enemies.testquencher.aiState, 'flee', 'a quencher within its keepaway distance should flee, not pursue a guarded torch');
+});
+test('a quencher never throws a bottle, even close and revealed', () => {
+  const w = makeWorld(1);
+  makeTestEnemy(w, 'testquencher', 'igniter', 8, 6, { role: 'quencher' });
+  w.player.x = 9; w.player.y = 6; // adjacent-ish, would trigger a throw for a plain igniter
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  assertEqual(Object.keys(w.hazards.bottles).length, 0, 'a quencher threw something — it should never attack');
+  assertEqual(w.enemies.testquencher.aiState, 'flee', 'a revealed quencher should still flee even without a throw');
+});
+
+console.log('# guardian role: never hunts, still reacts if actually revealed close');
+test('a guardian never goes curious, even with the player well inside its aggro radius', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testguardian', 'igniter', 8, 6, { role: 'guardian' });
+  const kind = CONTENT.enemyKinds.igniter;
+  w.player.x = e.x + 1; w.player.y = e.y; // well inside aggro, not revealed
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testguardian.aiState, 'lurk', 'a guardian should never go curious — it should stay lurking at its post');
+});
+test('a guardian still throws once and flees if actually revealed close, same as a plain igniter', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testguardian', 'igniter', 8, 6, { role: 'guardian' });
+  w.player.x = e.x + 2; w.player.y = e.y;
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testguardian.aiState, 'flee', 'a revealed guardian should flee exactly like any other lightAverse kind');
+  assertEqual(Object.keys(w.hazards.bottles).length, 1, 'a close, revealed guardian did not throw exactly one bottle, same as a plain igniter');
 });
 
 console.log('# fire.js: deterministic fire/hazard field');
@@ -1018,14 +1125,16 @@ test('hints match the active device', () => {
   assertEqual(keyHint('touch', 'confirm'), '');
   assertEqual(withHint('gamepad', 'confirm', 'Accept'), 'Accept (A)');
 });
-test('describeObjective covers all three types with no undefined', () => {
+test('describeObjective covers all four types with no undefined', () => {
   const lines = [
     describeObjective({ type: 'kill', target: 'lurker', n: 1 }),
     describeObjective({ type: 'collect', item: 'sounding-line' }),
     describeObjective({ type: 'reach', zone: 'the-hollow' }),
+    describeObjective({ type: 'light', torchId: 'torch1' }),
   ];
   for (const s of lines) assert(!s.includes('undefined'), `leaked undefined: ${s}`);
   assert(lines[0].toLowerCase().includes('lurker'), 'kill did not resolve the kind name');
+  assert(lines[3].toLowerCase().includes('torch'), 'light did not mention a torch');
   let threw = false; try { describeObjective({ type: 'nope' }); } catch { threw = true; }
   assert(threw, 'unknown objective type should throw');
 });
