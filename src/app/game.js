@@ -94,7 +94,14 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
   function dispatch(cmd) {
     const events = reduce(world, cmd);
     for (const e of events) onEvent(e);
-    if (!world.flags.ended && world.player.hp > 0) saveGame(world);
+    // `respawn` is the defeat handler's "rise where you began" checkpoint —
+    // it must track the most recent alive, non-ended state (same gate as the
+    // save below), not stay frozen at whatever `world` was when this
+    // startGame() call began. Left as a one-time snapshot, a whole play
+    // session's progress (quests, coins, position) would be discarded on
+    // every death, AND immediately overwritten onto the persisted save —
+    // silently destroying real progress, not just resetting position.
+    if (!world.flags.ended && world.player.hp > 0) { saveGame(world); respawn = JSON.stringify(world); }
     return events;
   }
 
@@ -235,7 +242,23 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
         else closeModal();
         break;
       case 'dialog': case 'defeat': case 'finale':
-        if (m.kind === 'defeat') { world = JSON.parse(respawn); ro = readonly(world); saveGame(world); closeModal(); toast('You rise where you began.'); }
+        if (m.kind === 'defeat') {
+          // Keep the checkpoint's PROGRESS (quests/coins/inventory/skills —
+          // see `respawn`'s own comment) but rise at the region's actual
+          // spawn point, full HP, fire out — never at the exact tile/moment
+          // you died. A checkpoint that restores your literal death position
+          // can drop you right back next to whatever just killed you, which
+          // (with its own real-time attack cooldown already elapsed by the
+          // time the hold-to-confirm finishes) can chain-kill immediately.
+          // "You rise where you began" is the toast text for a reason.
+          const revived = JSON.parse(respawn);
+          const spawn = CONTENT.regions[revived.region.id].spawn;
+          revived.player.x = spawn.x;
+          revived.player.y = spawn.y;
+          revived.player.hp = revived.player.maxHp;
+          revived.player.onFireTicks = 0;
+          world = revived; ro = readonly(world); saveGame(world); closeModal(); toast('You rise where you began.');
+        }
         else if (m.kind === 'finale') { if (navigator.clipboard?.writeText) navigator.clipboard.writeText(m.code).catch(() => {}); toast('Code copied. See you at the next crossing.'); closeModal(); }
         else closeModal();
         break;

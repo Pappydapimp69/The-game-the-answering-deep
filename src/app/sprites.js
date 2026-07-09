@@ -133,6 +133,7 @@ const ENEMY_PALETTE = {
   q: '#6a3f5a', j: '#42283a', p: '#241420', // shell: shelled plum-violet
   x: '#3a8a7a', y: '#1f5c4f', // darter: quick fin-teal
   W: '#bfe8e0', V: '#6fd0c0', N: '#0a2a26', // the Answerer: pale bioluminescent
+  f: '#ff8f3d', g: '#8a2e1a', h: '#241a14', // igniter: soot-hooded, ember-lit
 };
 function esprite(key, rows) { return { key, rows, palette: ENEMY_PALETTE }; }
 
@@ -189,6 +190,21 @@ export const ENEMY_SPRITES = {
     '.NNVVVVNN.',
     '.NNVVVVNN.',
     '..NN..NN..',
+  ]),
+  // Igniter: a soot-hooded silhouette with a flame crest and an ember-lit
+  // body — reads as "the one that carries fire" on sight, distinct from
+  // every echo-hunting kind since it's a ranged threat, not a chaser.
+  igniter: esprite('e-igniter', [
+    '..hfff....',
+    '.hhfgfh...',
+    '.hgEEgh...',
+    '.hgggghh..',
+    'hhggggghh.',
+    'hhgggggh..',
+    '.hg.hg....',
+    '..h..h....',
+    '..........',
+    '..........',
   ]),
 };
 
