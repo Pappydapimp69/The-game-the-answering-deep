@@ -370,9 +370,11 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       const npcId = nearest(world.npcs, 1);
       const pickId = nearest(world.pickups, 1, (p) => !p.taken);
       const crateId = nearest(world.destructibles, 1, (d) => !d.broken);
+      const torchId = nearest(world.torches, 1, (t) => !t.lit);
       if (npcId) dispatch({ type: 'TALK', npcId });
       else if (pickId) dispatch({ type: 'INTERACT', pickupId: pickId });
       else if (crateId) dispatch({ type: 'BREAK', destructibleId: crateId });
+      else if (torchId) dispatch({ type: 'LIGHT_TORCH', torchId });
       else toast('Nothing here');
     }
 
@@ -381,6 +383,7 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
       for (const id of Object.keys(world.enemies).sort()) {
         const en = world.enemies[id];
         if (!en.alive || dist(world.player, en) > 1) continue;
+        if (CONTENT.enemyKinds[en.kind].harmless) continue; // never strikes back, even cornered
         if (now >= (enemyCd[id] || 0)) { dispatch({ type: 'ENEMY_STRIKE', enemyId: id }); enemyCd[id] = now + ENEMY_CD_MS; }
       }
     }

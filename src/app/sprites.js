@@ -126,57 +126,15 @@ export const NPC_SPRITES = {
 };
 
 // One distinct silhouette per enemy kind, 10x10. The Drowned Reach's dangers
-// read as things of the deep — barnacled, shelled, finned, or bioluminescent
-// — never armored soldiers (that was the Waiting City's civic-guard reg).
+// read as things of the deep — never armored soldiers (that was the Waiting
+// City's civic-guard reg). Only two kinds now: the boss, and the Igniter.
 const ENEMY_PALETTE = {
-  t: '#5c7a82', u: '#3f5a62', k: '#243638', // lurker: barnacled slate-teal
-  q: '#6a3f5a', j: '#42283a', p: '#241420', // shell: shelled plum-violet
-  x: '#3a8a7a', y: '#1f5c4f', // darter: quick fin-teal
   W: '#bfe8e0', V: '#6fd0c0', N: '#0a2a26', // the Answerer: pale bioluminescent
   f: '#ff8f3d', g: '#8a2e1a', h: '#241a14', // igniter: soot-hooded, ember-lit
 };
 function esprite(key, rows) { return { key, rows, palette: ENEMY_PALETTE }; }
 
 export const ENEMY_SPRITES = {
-  // Lurker: a hunched, barnacle-crusted shape — low, wide, close to the floor.
-  lurker: esprite('e-lurker', [
-    '..........',
-    '...tttt...',
-    '..tuuuut..',
-    '.tukEEkut.',
-    '.tuukkuut.',
-    'ttukkkkutt',
-    'tkkkkkkkkt',
-    '.kk.kk.kk.',
-    '..k....k..',
-    '..........',
-  ]),
-  // Shell: a squat, thick-plated carapace — the immune-to-aura bulk.
-  shell: esprite('e-shell', [
-    '..qqqqqq..',
-    '.qjjjjjjq.',
-    'qjjppppjjq',
-    'qjppEEppjq',
-    'qjppppppjq',
-    'qjppppppjq',
-    '.qjppppjq.',
-    '..qjppjq..',
-    '..jp..pj..',
-    '..........',
-  ]),
-  // Darter: slender, finned, built to read as fast — the flee-at-low-hp kind.
-  darter: esprite('e-darter', [
-    '....xx....',
-    '...xxxx...',
-    '..xxxxxx..',
-    '.xxxEExxx.',
-    'yxxxxxxxxy',
-    '.yxxxxxxy.',
-    '..y.xx.y..',
-    '..y.xx.y..',
-    '...y..y...',
-    '..........',
-  ]),
   // The Answerer: pale, coral/bone-ridged, a glowing throat where a mouth
   // would be — the voice it stole is the one bright thing on it.
   answerer: esprite('e-answerer', [
@@ -239,4 +197,22 @@ export const TILE_SPRITES = {
   groundB: { key: 't-groundB', rows: ['qppp', 'ppqp', 'ppqr', 'pppp'], palette: TILE_PALETTE },
   roadA: { key: 't-roadA', rows: ['aaaa', 'abaa', 'aaaa', 'aaba'], palette: TILE_PALETTE },
   roadB: { key: 't-roadB', rows: ['aaaa', 'aaab', 'aaaa', 'baaa'], palette: TILE_PALETTE },
+};
+
+// Torch fixture — a player-lightable permanent light source (src/sim/
+// content.js's `torches`, LIGHT_TORCH in reduce.js). Unlit is just the
+// wooden post; lit adds a flame that reuses the same warm palette family as
+// the Igniter's own fire, since it's the same fictional substance.
+const TORCH_PALETTE = { o: '#4a3826', g: '#ff8f3d', f: '#ffcf6b' };
+export const TORCH_SPRITES = {
+  unlit: {
+    key: 'torch-unlit',
+    rows: ['........', '..oo....', '..oo....', '.oooo...', '..oo....', '..oo....', '..oo....', '........'],
+    palette: TORCH_PALETTE,
+  },
+  lit: {
+    key: 'torch-lit',
+    rows: ['..gg....', '.gffg...', '..oo....', '.oooo...', '..oo....', '..oo....', '..oo....', '........'],
+    palette: TORCH_PALETTE,
+  },
 };

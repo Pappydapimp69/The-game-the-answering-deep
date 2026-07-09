@@ -267,6 +267,23 @@ function reduceCore(state, command) {
       return events;
     }
 
+    case 'LIGHT_TORCH': {
+      const t = state.torches[command.torchId];
+      if (!t) throw new Error(`LIGHT_TORCH: no torch ${command.torchId}`);
+      if (t.lit) return [{ type: 'nothing_there', target: command.torchId }];
+      if (dist(state.player, t) > 1) return [{ type: 'too_far', target: command.torchId }];
+      t.lit = 1;
+      state.light.sources[`torch:${command.torchId}`] = { x: t.x, y: t.y, radius: t.radius, strength: t.strength };
+      recomputeLight(state);
+      // Striking a torch to life is loud and bright, same as a pulse — it
+      // reveals the area around it (echo.lit) and alerts anything within
+      // earshot, which is exactly what makes lighting one a real, weighable
+      // decision for a hunt rather than a free, silent switch-flip.
+      const events = [{ type: 'torch_lit', target: command.torchId }];
+      events.push(...applyPing(state, t.x, t.y, true));
+      return events;
+    }
+
     case 'BREAK': {
       const d = state.destructibles[command.destructibleId];
       if (!d) throw new Error(`BREAK: no destructible ${command.destructibleId}`);

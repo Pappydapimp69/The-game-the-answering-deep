@@ -12,7 +12,10 @@
 //
 // Enemies: a small per-kind state machine — patrol / chase / attack (display
 // only; ENEMY_STRIKE stays a separate presentation-triggered command, see
-// reduce.js) / return (to post) / flee (one kind only, hysteresis-gated).
+// reduce.js) / return (to post) / flee (hysteresis-gated). Currently only
+// the Answerer (the boss) uses this machine. Light-averse kinds (the
+// Igniter) skip it entirely for a separate hide-and-seek machine —
+// decideLightAverseAction, below — with its own lurk/curious/flee states.
 // Movement is a small integer BFS (src/sim/pathfind.js), never a full
 // behavior tree/GOAP — overkill at a handful of enemy kinds with ~4 states.
 //
@@ -27,8 +30,15 @@
 // tick, independent of iteration happenstance.
 
 import { CONTENT } from './content.js';
-import { bfsNextStep, stepAwayFrom } from './pathfind.js';
+import { bfsNextStep, stepAwayFrom, stepAwayFromDark } from './pathfind.js';
 import { nextInt } from './rng.js';
+import { lightAt } from './light.js';
+
+// A light-averse kind won't come to rest (end a tick not actively fleeing
+// or approaching) on a tile lit brighter than this, out of light.js's 0-100
+// graduated scale — but it crosses brighter ground than this without any
+// hesitation while actually moving somewhere. Only resting cares.
+const LIGHT_IDLE_THRESHOLD = 18;
 
 function chebyshev(a, b) { return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); }
 
@@ -56,6 +66,12 @@ export function decideEnemyAction(state, id, claimed) {
   const player = state.player;
   const distToPlayer = chebyshev(e, player);
   const distFromHome = chebyshev(e, { x: e.homeX, y: e.homeY });
+
+  // Light-averse kinds (the Igniter) run an entirely separate decision
+  // function — hide-and-seek, not chase-and-attack. See
+  // decideLightAverseAction's own header for the state shape.
+  if (kind.lightAverse) { decideLightAverseAction(state, id, e, kind, player, distToPlayer, distFromHome, claimed); return; }
+
   const hpPct = e.maxHp > 0 ? Math.floor((e.hp * 100) / e.maxHp) : 100;
 
   let next = e.aiState;
@@ -89,25 +105,6 @@ export function decideEnemyAction(state, id, claimed) {
   if (next !== e.aiState) { e.aiState = next; e.stateTicks = 0; }
   else e.stateTicks += 1;
 
-  // Projectile-armed kinds (e.g. igniter) throw a molotov at range instead of
-  // closing to melee. Bottle travel/landing is NOT decided here — it's
-  // TICK-level bookkeeping in reduce.js, so every bottle (including one just
-  // created this tick) is processed by one piece of uniform code, never
-  // duplicated between "just thrown" and "already in flight".
-  if (kind.throwRange) {
-    if (e.throwCooldown > 0) e.throwCooldown -= 1;
-    if (next === 'chase' && distToPlayer > 1 && distToPlayer <= kind.throwRange && e.throwCooldown === 0) {
-      const bottleId = `bottle_${id}_${state.tick}`;
-      const travelTicks = Math.max(1, Math.ceil(distToPlayer / 2));
-      state.hazards.bottles[bottleId] = {
-        x0: e.x, y0: e.y, x1: player.x, y1: player.y,
-        startTick: state.tick, travelTicks,
-      };
-      e.throwCooldown = kind.throwCooldownTicks;
-      return; // stands still to throw — skips the movement step below entirely
-    }
-  }
-
   let step = null;
   if (next === 'chase') {
     step = bfsNextStep(state, e.x, e.y, player.x, player.y, claimed);
@@ -129,6 +126,108 @@ export function decideEnemyAction(state, id, claimed) {
       const nx = e.x + dx, ny = e.y + dy;
       if (isOpenTile(state, nx, ny, claimed)) step = { x: nx, y: ny };
     }
+  }
+  commitMove(id, e, step, claimed);
+}
+
+// Least-lit open neighbor, fixed N/E/S/W order for a deterministic tie-break
+// (first-found-equal wins, never a random pick) — used both by lurk's own
+// wander and the universal "don't idle in bright light" override below.
+function pickDarkestOpenNeighbor(state, x, y, claimed) {
+  const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  let best = null, bestLight = Infinity;
+  for (const [dx, dy] of dirs) {
+    const nx = x + dx, ny = y + dy;
+    if (!isOpenTile(state, nx, ny, claimed)) continue;
+    const l = lightAt(state, nx, ny);
+    if (l < bestLight) { bestLight = l; best = { x: nx, y: ny }; }
+  }
+  return best;
+}
+
+// Hide-and-seek state machine for light-averse kinds (the Igniter) — replaces
+// patrol/chase/attack/return/search entirely for any kind flagged
+// `lightAverse` in content.js. Two axes, kept deliberately separate:
+//   - DETECTION is a discrete event: state.echo.lit (a fresh pulse touching
+//     this tile) means "just seen", not "standing in ambient light" — that's
+//     what decides curious/lurk -> flee (and a one-shot throw if it's close
+//     when it happens). Persistent standing light (torches/vents/fire/charge,
+//     src/sim/light.js) never triggers this by itself.
+//   - COMFORT is continuous: `lightAt()` is read only to (a) refuse to let
+//     the creature settle on a bright resting tile (LIGHT_IDLE_THRESHOLD) and
+//     (b) break ties when fleeing (stepAwayFromDark) — it otherwise crosses
+//     lit ground freely, moving or fleeing, without hesitation.
+// States: 'lurk' (default, dark-preferring idle wander) / 'curious' (noticed
+// the player, approaches slowly, never inside kind.keepAway) / 'flee'
+// (revealed — runs from the player, biased toward dark, until it's put
+// kind.leash tiles between itself and them).
+function decideLightAverseAction(state, id, e, kind, player, distToPlayer, distFromHome, claimed) {
+  // Always decrements regardless of outcome, same discipline as every other
+  // per-tick counter in this file — keeps replay exact independent of how
+  // many ticks happened to pass revealed vs not.
+  if (e.throwCooldown > 0) e.throwCooldown -= 1;
+
+  const revealed = Object.prototype.hasOwnProperty.call(state.echo.lit, `${e.x},${e.y}`);
+  let next;
+  if (revealed) {
+    // Startled: caught close, newly revealed (not already mid-flee), and off
+    // cooldown — one throw, then it runs, exactly like any other reveal.
+    // `aiState !== 'flee'` alone already stops it throwing every tick of a
+    // SINGLE flee episode (echo.lit stays true for the whole reveal window);
+    // the cooldown additionally paces separate flee episodes close together.
+    if (e.aiState !== 'flee' && distToPlayer > 1 && distToPlayer <= kind.throwRange && e.throwCooldown === 0) {
+      const bottleId = `bottle_${id}_${state.tick}`;
+      const travelTicks = Math.max(1, Math.ceil(distToPlayer / 2));
+      state.hazards.bottles[bottleId] = {
+        x0: e.x, y0: e.y, x1: player.x, y1: player.y,
+        startTick: state.tick, travelTicks,
+      };
+      e.throwCooldown = kind.throwCooldownTicks;
+    }
+    next = 'flee';
+  } else if (e.aiState === 'flee') {
+    // `leash` repurposed here: not distance-from-home (there is no home
+    // state for this kind) but distance-from-the-player it needs before
+    // it's willing to calm back down.
+    next = distToPlayer > kind.leash ? 'lurk' : 'flee';
+  } else if (distToPlayer <= kind.aggro) {
+    next = 'curious';
+  } else {
+    next = 'lurk';
+  }
+
+  if (next !== e.aiState) { e.aiState = next; e.stateTicks = 0; } else e.stateTicks += 1;
+
+  let step = null;
+  if (next === 'curious') {
+    // Approaches, but never closer than keepAway — recomputed fresh every
+    // tick from live distance, so it also naturally backs off/holds the
+    // instant the player closes the gap themselves.
+    if (distToPlayer > kind.keepAway) step = bfsNextStep(state, e.x, e.y, player.x, player.y, claimed);
+  } else if (next === 'flee') {
+    step = stepAwayFromDark(state, e.x, e.y, player.x, player.y, claimed);
+  } else {
+    // lurk: identical wander shape to the standard patrol roll (same fixed
+    // roll count, same patrolRadius bound) — light doesn't steer this step,
+    // only whether it's ALLOWED to stay put afterward (see below).
+    const moveRoll = nextInt(state.rng, 4);
+    const dirRoll = nextInt(state.rng, 4);
+    if (moveRoll > 0 && distFromHome < kind.patrolRadius) {
+      const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+      const [dx, dy] = dirs[dirRoll];
+      const nx = e.x + dx, ny = e.y + dy;
+      if (isOpenTile(state, nx, ny, claimed)) step = { x: nx, y: ny };
+    }
+  }
+  // Universal "won't stand stationary in light" rule: whenever the state
+  // logic above left it holding position (step is still null — only
+  // possible from 'lurk's idle roll or 'curious' already within keepAway),
+  // if its CURRENT tile is bright enough to be a problem, override with one
+  // corrective step toward the darkest open neighbor instead of truly
+  // idling there. An active 'flee' never reaches this (stepAwayFromDark
+  // only returns null if fully boxed in).
+  if (!step && lightAt(state, e.x, e.y) > LIGHT_IDLE_THRESHOLD) {
+    step = pickDarkestOpenNeighbor(state, e.x, e.y, claimed);
   }
   commitMove(id, e, step, claimed);
 }

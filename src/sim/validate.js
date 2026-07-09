@@ -47,6 +47,11 @@ export function validateContent(c) {
       if (!isInt(k.throwRange) || k.throwRange < 1) err(`enemyKind ${id}: bad throwRange`);
       if (!isInt(k.throwCooldownTicks) || k.throwCooldownTicks < 1) err(`enemyKind ${id}: throwCooldownTicks must be a positive int if throwRange is set`);
     }
+    if (k.lightAverse !== undefined) {
+      if (typeof k.lightAverse !== 'boolean') err(`enemyKind ${id}: lightAverse must be a boolean if present`);
+      if (k.lightAverse && (!isInt(k.keepAway) || k.keepAway < 1)) err(`enemyKind ${id}: keepAway must be a positive int if lightAverse is set`);
+    }
+    if (k.harmless !== undefined && typeof k.harmless !== 'boolean') err(`enemyKind ${id}: harmless must be a boolean if present`);
   }
   for (const [id, it] of Object.entries(c.items || {})) {
     if (it.price !== undefined && (!isInt(it.price) || it.price < 0)) err(`item ${id}: bad price`);
@@ -99,6 +104,12 @@ export function validateContent(c) {
       else if (blockedSet.has(`${ls.x},${ls.y}`)) err(`region ${rid}: lightSource ${id} on a blocked tile`);
       if (!isInt(ls.radius) || ls.radius < 1) err(`region ${rid}: lightSource ${id} bad radius`);
       if (!isInt(ls.strength) || ls.strength < 1 || ls.strength > 100) err(`region ${rid}: lightSource ${id} bad strength (must be 1-100)`);
+    }
+    for (const [id, t] of Object.entries(r.torches || {})) {
+      if (!inBounds(t.x, t.y)) err(`region ${rid}: torch ${id} out of bounds`);
+      else if (blockedSet.has(`${t.x},${t.y}`)) err(`region ${rid}: torch ${id} on a blocked tile`);
+      if (!isInt(t.radius) || t.radius < 1) err(`region ${rid}: torch ${id} bad radius`);
+      if (!isInt(t.strength) || t.strength < 1 || t.strength > 100) err(`region ${rid}: torch ${id} bad strength (must be 1-100)`);
     }
     if (blockedSet.has(`${r.spawn?.x},${r.spawn?.y}`)) err(`region ${rid}: spawn on blocked tile`);
   }

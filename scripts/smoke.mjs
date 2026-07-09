@@ -26,7 +26,7 @@ import { recomputeLight, lightAt } from '../src/sim/light.js';
 import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
 import { ENEMY_SPRITES, NPC_SPRITES } from '../src/app/sprites.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '967e2134';
+const GOLDEN_DEMO_FINGERPRINT = 'e0a3246a';
 
 const failures = [];
 let count = 0;
@@ -119,8 +119,8 @@ test('every NPC has a mapped sprite (no silent recolored-player fallback)', () =
 });
 test('deliberate content corruptions fail the build, not the player', () => {
   const corrupt = (mut) => { const c = structuredClone(CONTENT); mut(c); return validateContent(c).length > 0; };
-  assert(corrupt((c) => { c.enemyKinds.lurker.aiSenseReq = 0; }), 'aiSenseReq below senseReq passed');
-  assert(corrupt((c) => { c.enemyKinds.lurker.hearing = 0; }), 'zero hearing radius passed');
+  assert(corrupt((c) => { c.enemyKinds.igniter.aiSenseReq = 0; }), 'aiSenseReq below senseReq passed');
+  assert(corrupt((c) => { c.enemyKinds.igniter.hearing = 0; }), 'zero hearing radius passed');
   assert(corrupt((c) => { c.regions['the-drowned-reach'].buildings.hull.w = 99; }), 'structure footprint not fully in blocked passed');
   assert(corrupt((c) => { c.regions['the-drowned-reach'].cars.drifter1.y = 5; }), 'drifter starting off a current passed');
   assert(corrupt((c) => { c.regions['the-drowned-reach'].roads['2,2'] = 1; }), 'current tile overlapping a structure tile passed');
@@ -156,7 +156,7 @@ test('demo completes every quest and the finale', () => {
   for (const qid of ['into-the-dark', 'learn-to-listen', 'the-fleeing-kind', 'the-sounding-line', 'sound-the-deep']) {
     assert(w.quests.completed[qid] === 1, `${qid} not completed`);
   }
-  assert(!w.enemies['shell-elite1'].alive, 'elite shell still alive');
+  assert(!w.enemies['igniter-elite1'].alive, 'elite igniter still alive');
   assert(w.enemies.answerer1 && !w.enemies.answerer1.alive, 'the Answerer was never spawned/defeated');
   assert(w.arc.bossTaunted === 1, 'boss never taunted at half health');
   assertEqual(w.arc.choice, 'answer', 'answerer fate not recorded');
@@ -192,14 +192,16 @@ test('the finale is not offered until the sounding-line quest completes', () => 
 });
 
 console.log('# quest chain: a real branch (requiresAny), not a straight line');
+// Tickless combat (moveAdjacent/MELEE never TICKs) keeps a light-averse
+// Igniter parked at its spawn throughout — same trick the demo uses.
 test('completing learn-to-listen offers BOTH the-fleeing-kind and the-burning-kind at once', () => {
   const w = makeWorld(1);
   talkAndAccept(w, 'wren', 'into-the-dark');
   moveAdjacent(w, { x: 20, y: 10 });
   talkAndAccept(w, 'wren', 'learn-to-listen');
-  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.lurker1);
-  for (let i = 0; i < 5; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
+  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.igniter1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
   moveAdjacent(w, w.npcs.wren);
   const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
   const offered = ev.find((e) => e.type === 'quests_offered');
@@ -210,16 +212,16 @@ test('the-sounding-line is offered once EITHER branch completes, not requiring b
   talkAndAccept(w, 'wren', 'into-the-dark');
   moveAdjacent(w, { x: 20, y: 10 });
   talkAndAccept(w, 'wren', 'learn-to-listen');
-  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.lurker1);
-  for (let i = 0; i < 5; i++) reduce(w, { type: 'MELEE', enemyId: 'lurker1' });
+  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.igniter1);
+  for (let i = 0; i < 6; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
   // Take the-burning-kind branch (NOT the-fleeing-kind) and confirm that
   // alone is sufficient — the-fleeing-kind is never touched in this test.
   talkAndAccept(w, 'wren', 'the-burning-kind');
   assert(!w.quests.completed['the-fleeing-kind'], 'the-fleeing-kind should never have been accepted, let alone completed');
-  g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
-  moveAdjacent(w, w.enemies.igniter1);
-  for (let i = 0; i < 8; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter1' });
+  g = 0; while (!w.enemies.igniter3 && g++ < 10) reduce(w, { type: 'TICK' });
+  moveAdjacent(w, w.enemies.igniter3);
+  for (let i = 0; i < 8; i++) reduce(w, { type: 'MELEE', enemyId: 'igniter3' });
   assert(w.quests.completed['the-burning-kind'], 'the-burning-kind never completed');
   moveAdjacent(w, w.npcs.wren);
   const ev = reduce(w, { type: 'TALK', npcId: 'wren' });
@@ -228,16 +230,16 @@ test('the-sounding-line is offered once EITHER branch completes, not requiring b
 });
 
 console.log('# gated enemies/pickups still agnostic of prior actions');
-test('shell-elite1/chorusshard1 do not exist before the finale quest is accepted', () => {
+test('igniter-elite1/chorusshard1 do not exist before the finale quest is accepted', () => {
   const fresh = makeWorld(1);
-  assert(!fresh.enemies['shell-elite1'], 'gated enemy pre-spawned');
+  assert(!fresh.enemies['igniter-elite1'], 'gated enemy pre-spawned');
   assert(!fresh.pickups.chorusshard1, 'gated pickup pre-spawned');
 });
-test('lurker1/darter1/igniter1/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
+test('igniter1/igniter2/igniter3/soundingline1 do not exist before their quests are accepted (fixed soft-lock)', () => {
   const fresh = makeWorld(1);
-  assert(!fresh.enemies.lurker1, 'lurker1 pre-spawned — killable before learn-to-listen is accepted');
-  assert(!fresh.enemies.darter1, 'darter1 pre-spawned — killable before the-fleeing-kind is accepted');
-  assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before the-burning-kind is accepted');
+  assert(!fresh.enemies.igniter1, 'igniter1 pre-spawned — killable before learn-to-listen is accepted');
+  assert(!fresh.enemies.igniter2, 'igniter2 pre-spawned — killable before the-fleeing-kind is accepted');
+  assert(!fresh.enemies.igniter3, 'igniter3 pre-spawned — killable before the-burning-kind is accepted');
   assert(!fresh.pickups.soundingline1, 'soundingline1 pre-spawned — collectable before the-sounding-line is accepted');
 });
 test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not instant-spawn', () => {
@@ -247,45 +249,68 @@ test('quest-unlocked enemies telegraph before appearing (pendingSpawns), not ins
   moveAdjacent(w, w.npcs.wren);
   reduce(w, { type: 'TALK', npcId: 'wren' });
   const ev = reduce(w, { type: 'ACCEPT_QUEST', questId: 'learn-to-listen' });
-  assert(!w.enemies.lurker1, 'lurker1 spawned instantly on ACCEPT_QUEST instead of telegraphing');
-  assert(w.pendingSpawns.some((p) => p.id === 'lurker1'), 'lurker1 not queued in pendingSpawns');
-  assert(ev.some((e) => e.type === 'enemy_incoming' && e.target === 'lurker1'), 'no enemy_incoming event fired');
-  let g = 0; while (!w.enemies.lurker1 && g++ < 10) reduce(w, { type: 'TICK' });
-  assert(w.enemies.lurker1 && w.enemies.lurker1.alive === 1, 'lurker1 never actually appeared after its delay');
+  assert(!w.enemies.igniter1, 'igniter1 spawned instantly on ACCEPT_QUEST instead of telegraphing');
+  assert(w.pendingSpawns.some((p) => p.id === 'igniter1'), 'igniter1 not queued in pendingSpawns');
+  assert(ev.some((e) => e.type === 'enemy_incoming' && e.target === 'igniter1'), 'no enemy_incoming event fired');
+  let g = 0; while (!w.enemies.igniter1 && g++ < 10) reduce(w, { type: 'TICK' });
+  assert(w.enemies.igniter1 && w.enemies.igniter1.alive === 1, 'igniter1 never actually appeared after its delay');
 });
 
 // Regular enemies are quest-gated now — don't exist off a bare makeWorld().
 // Immunity/AI/sound unit tests build a synthetic enemy of the kind under test.
-function makeTestEnemy(w, id, kind, x, y) {
+function makeTestEnemy(w, id, kind, x, y, overrides = {}) {
   const k = CONTENT.enemyKinds[kind];
   w.enemies[id] = {
     x, y, kind, hp: k.hp, maxHp: k.hp, power: k.power, alive: 1, immune: k.immune || '',
     aiState: 'patrol', homeX: x, homeY: y, stateTicks: 0,
-    hearing: k.hearing || 5, heardX: -1, heardY: -1,
+    hearing: k.hearing || 5, heardX: -1, heardY: -1, throwCooldown: 0,
+    ...overrides,
   };
   return w.enemies[id];
 }
 
+// The only two shipped kinds now are 'answerer' (a one-off boss, patrolRadius
+// 0, no fleeAt, leash 99 — not a useful stand-in) and 'igniter' (light-averse,
+// runs an entirely different decision function). The standard chase/patrol/
+// search/flee machine in ai.js is still real, load-bearing code (it's what
+// the Answerer itself runs on) and still deserves direct, generic coverage,
+// so these tests exercise it against a synthetic kind injected into
+// CONTENT.enemyKinds only for the duration of the test — never shipped,
+// never validated as content, just a fixture with the same small tunable
+// values game 4's original lurker/darter kinds used.
+const TEST_STANDARD_KIND = {
+  name: 'Test Standard', hp: 10, power: 2, senseReq: 1, aiSenseReq: 3,
+  aggro: 2, hearing: 6, leash: 7, patrolRadius: 3, fleeAt: 30, resumeAt: 45, confidenceGated: true,
+};
+function withTestKind(fn) {
+  CONTENT.enemyKinds['test-standard'] = TEST_STANDARD_KIND;
+  try { fn('test-standard'); } finally { delete CONTENT.enemyKinds['test-standard']; }
+}
+
 console.log('# immunity mechanics');
-test('Shell (immune: aura) shrugs off a blast, dies to fists', () => {
+// No shipped kind carries `immune` anymore (the only roaming kind, the
+// Igniter, has none), but the mechanism itself is still real reducer logic —
+// covered here with an immune override on a synthetic instance rather than
+// pretending a retired kind still exists.
+test('an aura-immune target shrugs off a blast, dies to fists', () => {
   const w = makeWorld(1);
-  makeTestEnemy(w, 'testshell', 'shell', w.player.x + 1, w.player.y);
+  makeTestEnemy(w, 'testimmune', 'igniter', w.player.x + 1, w.player.y, { immune: 'aura' });
   chargeTo(w, 3);
   reduce(w, { type: 'PING' }); // light it so a blast is even allowed to be attempted
-  const blast = reduce(w, { type: 'AURA_BLAST', enemyId: 'testshell' });
-  assert(blast.some((e) => e.type === 'no_effect' && e.kind === 'aura'), 'aura should no_effect a shell');
-  assert(w.enemies.testshell.alive === 1, 'shell died to an immune blast');
-  let g = 0; while (w.enemies.testshell.alive && g++ < 20) reduce(w, { type: 'MELEE', enemyId: 'testshell' });
-  assert(!w.enemies.testshell.alive, 'shell never died to melee');
+  const blast = reduce(w, { type: 'AURA_BLAST', enemyId: 'testimmune' });
+  assert(blast.some((e) => e.type === 'no_effect' && e.kind === 'aura'), 'aura should no_effect an aura-immune target');
+  assert(w.enemies.testimmune.alive === 1, 'target died to an immune blast');
+  let g = 0; while (w.enemies.testimmune.alive && g++ < 20) reduce(w, { type: 'MELEE', enemyId: 'testimmune' });
+  assert(!w.enemies.testimmune.alive, 'target never died to melee');
 });
-test('Darter (immune: melee) shrugs off fists, dies to aura', () => {
+test('a melee-immune target shrugs off fists, dies to aura', () => {
   const w = makeWorld(1);
-  makeTestEnemy(w, 'testdarter', 'darter', w.player.x + 1, w.player.y);
-  const melee = reduce(w, { type: 'MELEE', enemyId: 'testdarter' });
-  assert(melee.some((e) => e.type === 'no_effect' && e.kind === 'melee'), 'melee should no_effect a darter');
-  assert(w.enemies.testdarter.alive === 1, 'darter died to an immune punch');
-  let g = 0; while (w.enemies.testdarter.alive && g++ < 30) { chargeTo(w, 3); reduce(w, { type: 'PING' }); reduce(w, { type: 'AURA_BLAST', enemyId: 'testdarter' }); }
-  assert(!w.enemies.testdarter.alive, 'darter never died to aura');
+  makeTestEnemy(w, 'testimmune', 'igniter', w.player.x + 1, w.player.y, { immune: 'melee' });
+  const melee = reduce(w, { type: 'MELEE', enemyId: 'testimmune' });
+  assert(melee.some((e) => e.type === 'no_effect' && e.kind === 'melee'), 'melee should no_effect a melee-immune target');
+  assert(w.enemies.testimmune.alive === 1, 'target died to an immune punch');
+  let g = 0; while (w.enemies.testimmune.alive && g++ < 30) { chargeTo(w, 3); reduce(w, { type: 'PING' }); reduce(w, { type: 'AURA_BLAST', enemyId: 'testimmune' }); }
+  assert(!w.enemies.testimmune.alive, 'target never died to aura');
 });
 
 console.log('# the echo mechanic (the signature system)');
@@ -333,13 +358,13 @@ test('you cannot aura-blast an unlit target, but can once a pulse reveals it', (
   // <= 0), so a target sitting AT distance 3 is guaranteed to stay unlit from
   // charging alone, keeping this test's premise (only a PING reveals it,
   // not the act of charging) valid under the new mechanic.
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 3, w.player.y);
+  const e = makeTestEnemy(w, 'testtarget', 'igniter', w.player.x + 3, w.player.y);
   chargeTo(w, 6);
-  const blind = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  const blind = reduce(w, { type: 'AURA_BLAST', enemyId: 'testtarget' });
   assert(blind.some((ev) => ev.type === 'unlit'), 'blasting an un-echo-located target should be refused as unlit');
   assert(e.hp === e.maxHp, 'the unlit blast must not have dealt damage');
   reduce(w, { type: 'PING' });
-  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testtarget' });
   assert(seen.some((ev) => ev.type === 'enemy_hit'), 'once lit, the blast should land');
 });
 test('light.js: falls off with distance, clamped to 0 at the edge of radius', () => {
@@ -374,9 +399,9 @@ test('a persistent light source satisfies the aura-blast reveal-gate on its own,
   const w = makeWorld(1);
   w.light.sources = { test: { x: w.player.x + 2, y: w.player.y, radius: 3, strength: 60 } };
   recomputeLight(w);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 2, w.player.y);
+  const e = makeTestEnemy(w, 'testtarget', 'igniter', w.player.x + 2, w.player.y);
   chargeTo(w, 6);
-  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testtarget' });
   assert(seen.some((ev) => ev.type === 'enemy_hit'), 'a lit-by-source target should be blastable without ever pinging');
 });
 test('a loud ping spends aura and reaches farther than a free quiet ping', () => {
@@ -388,96 +413,96 @@ test('a loud ping spends aura and reaches farther than a free quiet ping', () =>
   assert(loud.reach > quiet.reach, 'a loud pulse should out-reach a quiet one');
   assert(w.player.aura < before, 'a loud pulse should cost aura');
 });
-test('a ping is heard: a creature in earshot turns to SEARCH the sound origin, a beat late', () => {
+test('a ping is heard: a creature in earshot turns to SEARCH the sound origin, a beat late', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 5, w.player.y); // out of aggro(2), inside hearing(6)
-  assertEqual(w.enemies.testlurker.aiState, 'patrol', 'should start unaware');
+  makeTestEnemy(w, 'testenemy', kind, w.player.x + 5, w.player.y); // out of aggro(2), inside hearing(6)
+  assertEqual(w.enemies.testenemy.aiState, 'patrol', 'should start unaware');
   chargeTo(w, 3); // a loud pulse costs aura
   reduce(w, { type: 'PING', loud: true }); // loud carries the whole room
-  assertEqual(w.enemies.testlurker.aiState, 'search', 'a heard creature should switch to search');
-  assertEqual(w.enemies.testlurker.heardX, w.player.x, 'it should home on where the sound came FROM (last-known-position)');
+  assertEqual(w.enemies.testenemy.aiState, 'search', 'a heard creature should switch to search');
+  assertEqual(w.enemies.testenemy.heardX, w.player.x, 'it should home on where the sound came FROM (last-known-position)');
   const originX = w.player.x;
   reduce(w, { type: 'TICK' });
-  assert(Math.abs(w.enemies.testlurker.x - originX) < 5, 'the searcher should step toward the sound it heard');
-});
-test('a searcher that reaches the sound and finds nothing gives up and returns', () => {
+  assert(Math.abs(w.enemies.testenemy.x - originX) < 5, 'the searcher should step toward the sound it heard');
+}));
+test('a searcher that reaches the sound and finds nothing gives up and returns', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', 10, 4);
+  const e = makeTestEnemy(w, 'testenemy', kind, 10, 4);
   e.aiState = 'search'; e.heardX = 10; e.heardY = 4; // already standing on the heard spot
   w.player.x = 1; w.player.y = 18; // far away and silent
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testlurker.aiState, 'return', 'reaching the sound with nobody there should de-escalate to return');
-  assertEqual(w.enemies.testlurker.heardX, -1, 'the stale last-known-position should be cleared');
-});
+  assertEqual(w.enemies.testenemy.aiState, 'return', 'reaching the sound with nobody there should de-escalate to return');
+  assertEqual(w.enemies.testenemy.heardX, -1, 'the stale last-known-position should be cleared');
+}));
 
 console.log('# deterministic enemy AI');
-test('a patrolling enemy switches to chase once the player enters its (small) aggro radius', () => {
+test('a patrolling enemy switches to chase once the player enters its (small) aggro radius', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', 7, 4);
-  assertEqual(e.aiState, 'patrol', 'lurker should start patrolling');
+  const e = makeTestEnemy(w, 'testenemy', kind, 7, 4);
+  assertEqual(e.aiState, 'patrol', 'should start patrolling');
   w.player.x = e.x; w.player.y = e.y + 1; // Chebyshev distance 1, within aggro 2
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testlurker.aiState, 'chase', 'lurker did not notice an adjacent player');
-});
-test('a far-away player leaves an enemy patrolling', () => {
+  assertEqual(w.enemies.testenemy.aiState, 'chase', 'did not notice an adjacent player');
+}));
+test('a far-away player leaves an enemy patrolling', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  makeTestEnemy(w, 'testlurker', 'lurker', 7, 4);
-  makeTestEnemy(w, 'testdarter', 'darter', 21, 15);
+  makeTestEnemy(w, 'testenemy1', kind, 7, 4);
+  makeTestEnemy(w, 'testenemy2', kind, 21, 15);
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testlurker.aiState, 'patrol', 'lurker aggroed with no player nearby');
-  assertEqual(w.enemies.testdarter.aiState, 'patrol', 'darter aggroed with no player nearby');
-});
-test('a chasing enemy takes a real step toward the player each tick', () => {
+  assertEqual(w.enemies.testenemy1.aiState, 'patrol', 'aggroed with no player nearby');
+  assertEqual(w.enemies.testenemy2.aiState, 'patrol', 'aggroed with no player nearby');
+}));
+test('a chasing enemy takes a real step toward the player each tick', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', 7, 4);
+  const e = makeTestEnemy(w, 'testenemy', kind, 7, 4);
   w.player.x = e.x + 2; w.player.y = e.y; // within aggro(2), not adjacent
   const before = `${e.x},${e.y}`;
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testlurker.aiState, 'chase', 'lurker did not enter chase');
-  assert(`${w.enemies.testlurker.x},${w.enemies.testlurker.y}` !== before, 'chasing lurker never moved');
-  const distAfter = Math.max(Math.abs(w.enemies.testlurker.x - w.player.x), Math.abs(w.enemies.testlurker.y - w.player.y));
-  assert(distAfter < 2, 'chasing lurker did not close the distance');
-});
-test('a badly wounded Darter flees instead of closing in', () => {
+  assertEqual(w.enemies.testenemy.aiState, 'chase', 'did not enter chase');
+  assert(`${w.enemies.testenemy.x},${w.enemies.testenemy.y}` !== before, 'chasing enemy never moved');
+  const distAfter = Math.max(Math.abs(w.enemies.testenemy.x - w.player.x), Math.abs(w.enemies.testenemy.y - w.player.y));
+  assert(distAfter < 2, 'chasing enemy did not close the distance');
+}));
+test('a badly wounded chaser flees instead of closing in', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testdarter', 'darter', 21, 15);
+  const e = makeTestEnemy(w, 'testenemy', kind, 21, 15);
   e.hp = Math.floor(e.maxHp * 0.2); // 20% — below fleeAt(30)
   w.player.x = e.x + 1; w.player.y = e.y;
   const distBefore = 1;
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testdarter.aiState, 'flee', 'badly wounded darter did not flee');
-  const distAfter = Math.max(Math.abs(w.enemies.testdarter.x - w.player.x), Math.abs(w.enemies.testdarter.y - w.player.y));
-  assert(distAfter >= distBefore, 'fleeing darter moved toward the player instead of away');
-});
-test('a chasing enemy gives up and returns to post once it exceeds its leash', () => {
+  assertEqual(w.enemies.testenemy.aiState, 'flee', 'badly wounded enemy did not flee');
+  const distAfter = Math.max(Math.abs(w.enemies.testenemy.x - w.player.x), Math.abs(w.enemies.testenemy.y - w.player.y));
+  assert(distAfter >= distBefore, 'fleeing enemy moved toward the player instead of away');
+}));
+test('a chasing enemy gives up and returns to post once it exceeds its leash', () => withTestKind((kind) => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', 7, 4);
+  const e = makeTestEnemy(w, 'testenemy', kind, 7, 4);
   e.aiState = 'chase';
   e.x = 30; e.y = 4; // far from home (7,4) and far from player
   w.player.x = 31; w.player.y = 4;
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testlurker.aiState, 'return', 'lurker kept chasing past its leash');
-});
+  assertEqual(w.enemies.testenemy.aiState, 'return', 'kept chasing past its leash');
+}));
 
 console.log('# perception legibility (carried from game 3, now reading alert)');
 test('confidence-gated kinds read off per-kind encounter count, not the perception stat', () => {
-  const seeker = makeWorld(1, { archetype: 'seeker' }); // perception 2, but lurker no longer cares
-  assert(!canSense(seeker.player, 'lurker'), 'zero encounters should not yet read lurker hp/power (senseReq 1)');
-  assert(!canReadIntent(seeker.player, 'lurker'), 'zero encounters should not yet read lurker tell (aiSenseReq 3)');
-  seeker.player.intel.lurker = 1;
-  assert(canSense(seeker.player, 'lurker'), 'intel 1 should read lurker hp/power (senseReq 1)');
-  assert(!canReadIntent(seeker.player, 'lurker'), 'intel 1 should NOT yet read lurker tell (aiSenseReq 3)');
+  const seeker = makeWorld(1, { archetype: 'seeker' }); // perception 2, but the Igniter no longer cares
+  assert(!canSense(seeker.player, 'igniter'), 'zero encounters should not yet read igniter hp/power (senseReq 2)');
+  assert(!canReadIntent(seeker.player, 'igniter'), 'zero encounters should not yet read igniter tell (aiSenseReq 3)');
+  seeker.player.intel.igniter = 2;
+  assert(canSense(seeker.player, 'igniter'), 'intel 2 should read igniter hp/power (senseReq 2)');
+  assert(!canReadIntent(seeker.player, 'igniter'), 'intel 2 should NOT yet read igniter tell (aiSenseReq 3)');
   seeker.player.skills.perception.lvl = 99;
-  assert(!canReadIntent(seeker.player, 'lurker'), 'raising the perception stat should not affect a confidence-gated kind');
-  seeker.player.intel.lurker = 3;
-  assert(canReadIntent(seeker.player, 'lurker'), 'intel 3 should read lurker tell (aiSenseReq 3)');
+  assert(!canReadIntent(seeker.player, 'igniter'), 'raising the perception stat should not affect a confidence-gated kind');
+  seeker.player.intel.igniter = 3;
+  assert(canReadIntent(seeker.player, 'igniter'), 'intel 3 should read igniter tell (aiSenseReq 3)');
 });
 test('a loss builds confidence exactly like a win (exposure, not skill, is measured)', () => {
   const w = makeWorld(1);
-  makeTestEnemy(w, 'testlurker', 'lurker', w.player.x + 1, w.player.y);
-  assertEqual(w.player.intel.lurker || 0, 0, 'fresh world should have no lurker intel');
-  reduce(w, { type: 'ENEMY_STRIKE', enemyId: 'testlurker' });
-  assertEqual(w.player.intel.lurker, 1, 'losing an exchange to a lurker did not build intel on it');
+  makeTestEnemy(w, 'testenemy', 'igniter', w.player.x + 1, w.player.y);
+  assertEqual(w.player.intel.igniter || 0, 0, 'fresh world should have no igniter intel');
+  reduce(w, { type: 'ENEMY_STRIKE', enemyId: 'testenemy' });
+  assertEqual(w.player.intel.igniter, 1, 'losing an exchange to an igniter did not build intel on it');
 });
 test('the Answerer stays on the flat perception-stat gate — a deliberate one-shot exception', () => {
   const seeker = makeWorld(1, { archetype: 'seeker' }); // perception 2
@@ -489,6 +514,39 @@ test('the Answerer stays on the flat perception-stat gate — a deliberate one-s
   assert(!canReadIntent(seeker.player, 'answerer'), 'perception 3 should not yet read Answerer tell (aiSenseReq 4)');
   seeker.player.skills.perception.lvl = 4;
   assert(canReadIntent(seeker.player, 'answerer'), 'perception 4 should read Answerer tell (aiSenseReq 4)');
+});
+
+console.log('# torches: permanent, player-lit fixtures (LIGHT_TORCH)');
+test('lighting a torch is permanent, registers a light source, and cannot be re-lit', () => {
+  const w = makeWorld(1);
+  const t = w.torches.torch1;
+  assertEqual(t.lit, 0, 'a fresh torch should start unlit');
+  assertEqual(lightAt(w, t.x, t.y), 0, 'an unlit torch should emit no light yet');
+  w.player.x = t.x; w.player.y = t.y;
+  const ev = reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch1' });
+  assert(ev.some((e) => e.type === 'torch_lit'), 'LIGHT_TORCH should emit a torch_lit event');
+  assertEqual(w.torches.torch1.lit, 1, 'torch should now be lit');
+  assert(lightAt(w, t.x, t.y) > 0, 'a lit torch should register as a real light source');
+  const again = reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch1' });
+  assert(again.some((e) => e.type === 'nothing_there'), 'an already-lit torch should refuse a second light');
+});
+test('lighting a torch requires proximity, same as any other interactable', () => {
+  const w = makeWorld(1);
+  const t = w.torches.torch1;
+  w.player.x = t.x + 5; w.player.y = t.y;
+  const ev = reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch1' });
+  assert(ev.some((e) => e.type === 'too_far'), 'lighting a distant torch should be refused as too_far');
+  assertEqual(w.torches.torch1.lit, 0, 'a refused light attempt must not have lit the torch');
+});
+test('lighting a torch is loud: it reveals the area and can startle a light-averse creature nearby', () => {
+  const w = makeWorld(1);
+  const t = w.torches.torch1;
+  w.player.x = t.x; w.player.y = t.y;
+  const e = makeTestEnemy(w, 'testigniter', 'igniter', t.x + 2, t.y);
+  reduce(w, { type: 'LIGHT_TORCH', torchId: 'torch1' });
+  assert(Object.prototype.hasOwnProperty.call(w.echo.lit, `${e.x},${e.y}`), 'igniting a torch should echo-reveal a creature standing nearby');
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'flee', 'a creature revealed by a torch\'s ignition should react exactly like a pulse reveal');
 });
 
 console.log('# fire.js: deterministic fire/hazard field');
@@ -527,17 +585,50 @@ test('fire never spreads onto or persists on a water/road tile', () => {
 });
 
 console.log('# molotov-throwing enemies (igniter kind) + bottle flight/landing');
-test('an igniter enemy in range and off cooldown throws a bottle at the player', () => {
+test('an igniter noticed nearby (not revealed) goes curious, not aggressive, and never closes to melee', () => {
+  const w = makeWorld(1);
+  const e = makeTestEnemy(w, 'testigniter', 'igniter', 5, 8); // open floor, no nearby light source
+  w.player.x = e.x + 3; w.player.y = e.y; // within aggro(4), not revealed
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'curious', 'an un-revealed, noticed igniter should go curious, not chase');
+  assertEqual(Object.keys(w.hazards.bottles).length, 0, 'curious alone should never throw a bottle');
+  for (let i = 0; i < 10; i++) reduce(w, { type: 'TICK' });
+  const dist = Math.max(Math.abs(w.enemies.testigniter.x - w.player.x), Math.abs(w.enemies.testigniter.y - w.player.y));
+  assert(dist >= CONTENT.enemyKinds.igniter.keepAway, 'a curious igniter closed inside its own keepAway distance');
+});
+test('a light-averse enemy caught close by a fresh reveal throws once, then flees', () => {
   const w = makeWorld(1);
   const e = makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
-  e.throwCooldown = 0;
   const kind = CONTENT.enemyKinds.igniter;
-  w.player.x = e.x + 3; w.player.y = e.y; // within aggro(4) and throwRange(6), not adjacent
+  w.player.x = e.x + 3; w.player.y = e.y; // within throwRange(6), not adjacent
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true }); // reveals it (echo.lit) — the detection event
   assertEqual(Object.keys(w.hazards.bottles).length, 0, 'a bottle already existed before any TICK');
   reduce(w, { type: 'TICK' });
-  assertEqual(w.enemies.testigniter.aiState, 'chase', 'igniter did not notice the player within aggro');
-  assertEqual(Object.keys(w.hazards.bottles).length, 1, 'igniter did not throw exactly one bottle');
+  assertEqual(w.enemies.testigniter.aiState, 'flee', 'a revealed igniter should flee, not stand and fight');
+  assertEqual(Object.keys(w.hazards.bottles).length, 1, 'a close, newly-revealed igniter did not throw exactly one bottle');
   assertEqual(w.enemies.testigniter.throwCooldown, kind.throwCooldownTicks, 'throwCooldown not set to the full cooldown after throwing');
+});
+test('an igniter revealed while already far away just flees — no throw', () => {
+  const w = makeWorld(1);
+  makeTestEnemy(w, 'testigniter', 'igniter', 8, 6);
+  w.player.x = 8; w.player.y = 13; // chebyshev 7, past throwRange(6)
+  chargeTo(w, 3);
+  reduce(w, { type: 'PING', loud: true });
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'flee', 'a far-but-revealed igniter should still flee');
+  assertEqual(Object.keys(w.hazards.bottles).length, 0, 'too far to throw should never create a bottle');
+});
+test('light-averse lurking never rests on a bright tile — it steps toward dark instead', () => {
+  const w = makeWorld(1);
+  w.light.sources = { bright: { x: 8, y: 6, radius: 3, strength: 90 } };
+  recomputeLight(w);
+  const e = makeTestEnemy(w, 'testigniter', 'igniter', 8, 6); // sitting right on the bright source
+  w.player.x = 1; w.player.y = 1; // far outside aggro — should be plain 'lurk'
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.enemies.testigniter.aiState, 'lurk', 'should be lurking with no player nearby');
+  assert(e.x !== 8 || e.y !== 6, 'a light-averse lurker never left a tile brighter than its idle threshold');
+  assert(lightAt(w, e.x, e.y) < lightAt(w, 8, 6), 'it should have moved toward a dimmer tile');
 });
 test('a landed bottle ignites its target tile; a bottle landing on water does not ignite', () => {
   const w = makeWorld(1);
@@ -637,12 +728,12 @@ test('CHARGE sets a light source scaling with aura %, cleaned up after CHARGE_LI
 });
 test('a fire-lit (not echo-pinged) enemy is blastable via AURA_BLAST with no PING first', () => {
   const w = makeWorld(1);
-  const e = makeTestEnemy(w, 'testlurker', 'lurker', w.player.x, w.player.y - 2);
+  const e = makeTestEnemy(w, 'testtarget', 'igniter', w.player.x, w.player.y - 2);
   igniteAt(w, e.x, e.y);
   stepFire(w); // registers the fire light source (fire.js does not recompute)
   recomputeLight(w);
   chargeTo(w, 6);
-  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testlurker' });
+  const seen = reduce(w, { type: 'AURA_BLAST', enemyId: 'testtarget' });
   assert(seen.some((ev) => ev.type === 'enemy_hit'), 'a fire-lit target should be blastable without ever pinging');
 });
 

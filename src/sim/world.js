@@ -17,7 +17,8 @@ import { recomputeLight } from './light.js';
 // .3: added player.hasPinged (an old save's players have certainly pinged by
 // now, but reading it as falsy would wrongly re-blind them — route to New
 // Game instead of a false start-of-game readout).
-export const WORLD_VERSION = 'answeringdeep4.3';
+// .4: added state.torches (player-lit permanent fixtures).
+export const WORLD_VERSION = 'answeringdeep4.4';
 
 export function makeWorld(seed, options = {}) {
   if (!Number.isInteger(seed)) throw new Error('makeWorld: seed must be an integer');
@@ -152,6 +153,11 @@ export function makeWorld(seed, options = {}) {
     // holds burning tiles (id "x,y" -> {fuel}). Both are stepped by
     // reduce.js's TICK case; fire tiles also register as light.js sources.
     hazards: { bottles: {}, fire: {} },
+    // Torches (content-authored fixtures, id -> {x,y,radius,strength,lit}) —
+    // start unlit; reduce.js's LIGHT_TORCH case flips `lit` to 1 permanently
+    // and registers a matching src/sim/light.js source. Unlike a bottle/fire
+    // light, a torch never gets removed once lit.
+    torches: {},
     quests: { defs: questDefs, offered: {}, active: {}, completed: {} },
     arc: {
       bossDef: {
@@ -183,6 +189,12 @@ export function makeWorld(seed, options = {}) {
   // field the same way — this is just construction time's version of that.
   for (const [id, ls] of Object.entries(regionDef.lightSources || {})) {
     state.light.sources[id] = { x: ls.x, y: ls.y, radius: ls.radius, strength: ls.strength };
+  }
+  // Torches start unlit — nothing added to state.light.sources here; that
+  // only happens once the player actually lights one (reduce.js's
+  // LIGHT_TORCH case).
+  for (const [id, t] of Object.entries(regionDef.torches || {})) {
+    state.torches[id] = { x: t.x, y: t.y, radius: t.radius, strength: t.strength, lit: 0 };
   }
   recomputeLight(state);
 

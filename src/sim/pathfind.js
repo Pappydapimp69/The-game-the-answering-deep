@@ -9,6 +9,8 @@
 // nodes in identical order and pick the identical equal-cost path, regardless
 // of any JS engine's own iteration behavior.
 
+import { lightAt } from './light.js';
+
 // N, NE, E, SE, S, SW, W, NW — fixed forever.
 const NEIGHBORS = [
   [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1],
@@ -76,6 +78,26 @@ export function stepAwayFrom(state, fromX, fromY, awayX, awayY, occupied) {
     if (!isOpen(state, nx, ny, occupied)) continue;
     const d = Math.max(Math.abs(nx - awayX), Math.abs(ny - awayY));
     if (d > bestDist) { bestDist = d; best = { x: nx, y: ny }; }
+  }
+  return best;
+}
+
+// Same greedy "move away" shape as stepAwayFrom, but for a fleeing creature
+// that also prefers darker ground (src/sim/light.js's graduated field) —
+// distance from the threat dominates the score heavily (any 1-tile
+// improvement in distance always wins), so it never sacrifices real safety
+// for a dimmer tile; light only breaks ties among equally-safe options. It
+// will happily cross a lit tile if that's the only way to gain distance —
+// only RESTING somewhere bright is avoided elsewhere (the idle-threshold
+// check lives in ai.js, not here).
+export function stepAwayFromDark(state, fromX, fromY, awayX, awayY, occupied) {
+  let best = null, bestScore = -Infinity;
+  for (const [dx, dy] of NEIGHBORS) {
+    const nx = fromX + dx, ny = fromY + dy;
+    if (!isOpen(state, nx, ny, occupied)) continue;
+    const d = Math.max(Math.abs(nx - awayX), Math.abs(ny - awayY));
+    const score = d * 1000 - lightAt(state, nx, ny);
+    if (score > bestScore) { bestScore = score; best = { x: nx, y: ny }; }
   }
   return best;
 }

@@ -49,15 +49,19 @@ export function demoCommands() {
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'into-the-dark' });
   walkTo(20, 10); // the-shallows zone, at Marrow's post — completes quest 1
 
-  // --- Quest 2: Learn to Listen (kill a Lurker — no immunity, melee) ------
+  // --- Quest 2: Learn to Listen (catch an Igniter — no immunity, melee) ---
+  // Tickless combat (see the header note) keeps it parked at its spawn the
+  // whole time, same as any other kind — MELEE has no light-gate and the
+  // light-averse AI only ever reacts to a TICK, and there isn't one between
+  // arriving and finishing it off.
   walkTo(3, 10);
   cmds.push({ type: 'TALK', npcId: 'wren' }); // offers 'learn-to-listen'
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'learn-to-listen' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' }); // spawn telegraph
-  walkTo(7, 4);
-  for (let i = 0; i < 5; i++) cmds.push({ type: 'MELEE', enemyId: 'lurker1' });
+  walkTo(13, 19);
+  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter1' });
 
-  // --- Quest 3: The Fleeing Kind (kill a Darter — immune: melee) ----------
+  // --- Quest 3: The Fleeing Kind (catch a second Igniter) -----------------
   // This TALK actually offers TWO quests now (the-fleeing-kind AND its
   // branch-mate the-burning-kind — see content.js), since 'the-sounding-line'
   // only needs ONE of them done (requiresAny). This replay takes the
@@ -68,14 +72,7 @@ export function demoCommands() {
   cmds.push({ type: 'ACCEPT_QUEST', questId: 'the-fleeing-kind' });
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' });
   walkTo(21, 15);
-  cmds.push({ type: 'MELEE', enemyId: 'darter1' }); // no_effect (immune: melee)
-  ping(false); // echo-locate the darter so the blasts can land (reveal-gate)
-  charge(6);
-  cmds.push({ type: 'AURA_BLAST', enemyId: 'darter1' });
-  cmds.push({ type: 'AURA_BLAST', enemyId: 'darter1' });
-  charge(6);
-  cmds.push({ type: 'AURA_BLAST', enemyId: 'darter1' });
-  cmds.push({ type: 'AURA_BLAST', enemyId: 'darter1' });
+  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter2' });
 
   // --- Quest 4: The Sounding Line (collect it) ----------------------------
   walkTo(3, 10);
@@ -91,7 +88,7 @@ export function demoCommands() {
   cmds.push({ type: 'TICK' }, { type: 'TICK' }, { type: 'TICK' });
 
   walkTo(21, 14);
-  for (let i = 0; i < 5; i++) cmds.push({ type: 'MELEE', enemyId: 'shell-elite1' }); // immune: aura, melee works
+  for (let i = 0; i < 6; i++) cmds.push({ type: 'MELEE', enemyId: 'igniter-elite1' });
 
   walkTo(30, 15);
   cmds.push({ type: 'INTERACT', pickupId: 'chorusshard1' });

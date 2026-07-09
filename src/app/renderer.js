@@ -26,7 +26,8 @@ import { canSense, enemyReadout } from '../sim/info.js';
 import { withHint, keyHint } from './device-labels.js';
 import { describeObjective } from './objective-text.js';
 import { drawPixelSprite } from './pixelart.js';
-import { PLAYER_SPRITES, NPC_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES } from './sprites.js';
+import { PLAYER_SPRITES, NPC_SPRITES, BLAST_SPRITE, ENEMY_SPRITES, CAR_SPRITE, TILE_SPRITES, TORCH_SPRITES } from './sprites.js';
+import { DITHER_DEFS, ditherBucket } from './dither.js';
 
 export const TILE = 24;
 
@@ -176,6 +177,12 @@ export function render(ctx, w, view, now = 0) {
   const visible = (tx, ty) => tileLight(tx, ty) > 0;
 
   // --- ground: current vs floor (culled + dark-gated) ----------------------
+  // `visible()` stays the hard on/off cutoff — a tile at intensity 0 still
+  // isn't drawn. But among tiles that DO pass that gate, tileLight() is
+  // graduated (1-100) and was previously thrown away: a barely-lit tile and
+  // a torch-bright one drew pixel-identical. The dither overlay below makes
+  // that difference visible, in the same stippled-pixel-art idiom as the
+  // rest of this file (see dither.js) rather than a smooth alpha gradient.
   for (let ty = minTY; ty <= maxTY; ty++) {
     for (let tx = minTX; tx <= maxTX; tx++) {
       if (!visible(tx, ty)) continue;
@@ -183,6 +190,9 @@ export function render(ctx, w, view, now = 0) {
       const even = (tx + ty) % 2 === 0;
       const def = isRoad ? (even ? TILE_SPRITES.roadA : TILE_SPRITES.roadB) : (even ? TILE_SPRITES.groundA : TILE_SPRITES.groundB);
       drawPixelSprite(ctx, def, tx * TILE, ty * TILE, TILE);
+      const darkness = Math.max(0, Math.min(100, 100 - tileLight(tx, ty)));
+      const bucket = ditherBucket(darkness);
+      if (bucket > 0) drawPixelSprite(ctx, DITHER_DEFS[bucket], tx * TILE, ty * TILE, TILE);
     }
   }
 
@@ -227,6 +237,13 @@ export function render(ctx, w, view, now = 0) {
       ctx.moveTo(x + TILE / 2, y + 5); ctx.lineTo(x + TILE - 5, y + TILE / 2);
       ctx.lineTo(x + TILE / 2, y + TILE - 5); ctx.lineTo(x + 5, y + TILE / 2);
       ctx.closePath(); ctx.fill();
+    });
+  }
+  for (const id of Object.keys(w.torches)) {
+    const t = w.torches[id];
+    add(t.x, t.y, () => {
+      const [x, y] = tile(t.x, t.y);
+      drawPixelSprite(ctx, t.lit ? TORCH_SPRITES.lit : TORCH_SPRITES.unlit, x + 4, y + 4, TILE - 8);
     });
   }
   for (const id of Object.keys(w.npcs)) {

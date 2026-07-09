@@ -65,17 +65,36 @@ export const CONTENT = {
   // counter, win or loss); for the Answerer (no flag) it reads the flat
   // perception level, the deliberate one-shot-boss exception.
   enemyKinds: {
-    lurker: { name: 'Lurker', hp: 10, power: 2, senseReq: 1, aiSenseReq: 3, aggro: 2, hearing: 6, leash: 7, patrolRadius: 3, confidenceGated: true },
-    shell: { name: 'Shell', hp: 13, power: 2, senseReq: 1, aiSenseReq: 3, immune: 'aura', aggro: 2, hearing: 4, leash: 6, patrolRadius: 2, confidenceGated: true },
-    darter: {
-      name: 'Darter', hp: 10, power: 3, senseReq: 1, aiSenseReq: 3, immune: 'melee',
-      aggro: 3, hearing: 8, leash: 8, patrolRadius: 3, fleeAt: 30, resumeAt: 45, confidenceGated: true,
-    },
     answerer: { name: 'The Answerer', hp: 46, power: 5, senseReq: 3, aiSenseReq: 4, aggro: 4, hearing: 14, leash: 99, patrolRadius: 0 },
-    // Projectile-armed: throws a molotov at range instead of closing in (see
-    // src/sim/ai.js's throwRange branch). throwCooldownTicks paces how often
-    // it can throw once in range.
-    igniter: { name: 'Igniter', hp: 11, power: 1, senseReq: 2, aiSenseReq: 3, aggro: 4, hearing: 6, leash: 6, patrolRadius: 2, confidenceGated: true, throwRange: 6, throwCooldownTicks: 5 },
+    // The only roaming creature in the reach — a hide-and-seek predator/prey,
+    // not a fighter. `lightAverse` routes it to a wholly separate decision
+    // function (src/sim/ai.js's decideLightAverseAction) that ignores the
+    // standard chase/attack/return/search machinery entirely:
+    //   - `aggro`: notice radius that starts a slow, distance-capped
+    //     approach ('curious') rather than a chase.
+    //   - `keepAway`: the closest it will ever willingly get while curious —
+    //     it never enters melee range on its own.
+    //   - being REVEALED (echo.lit — a fresh pulse touching its tile) is a
+    //     discrete detection event, not an ongoing light cost: close and
+    //     revealed -> one throw, then flee; far and revealed -> just flee.
+    //   - `leash` is repurposed here as "how far it must get from the
+    //     player before it calms back down to lurking", not distance-
+    //     from-home (there is no chase/return state for this kind).
+    //   - persistent standing light (torches/vents/fire/charge — the
+    //     graduated field from src/sim/light.js) is a SEPARATE, continuous
+    //     cost: it freely walks through lit ground, it just won't come to
+    //     rest on a tile bright enough to matter (see LIGHT_IDLE_THRESHOLD
+    //     in ai.js) — dimmer tiles are less of a problem, by construction,
+    //     since that field already falls off with distance from a source.
+    //   - `harmless`: never melee-strikes the player even if cornered
+    //     (game.js's real-time proximity auto-attack skips this kind) — it
+    //     only ever hurts you at range, with fire, defensively.
+    igniter: {
+      name: 'Igniter', hp: 11, power: 1, senseReq: 2, aiSenseReq: 3,
+      aggro: 4, keepAway: 3, hearing: 6, leash: 6, patrolRadius: 2,
+      confidenceGated: true, lightAverse: true, harmless: true,
+      throwRange: 6, throwCooldownTicks: 5,
+    },
   },
 
   regions: {
@@ -126,21 +145,15 @@ export const CONTENT = {
           ],
         },
       },
+      // Four named Igniter instances, one per hunt quest, all existence-gated
+      // the same way as every other quest-tied kill target (see reduce.js
+      // ACCEPT_QUEST / world.js gatedEnemyIds) — none of them exist in a
+      // fresh world, so a free-roam kill can never soft-lock a quest.
       enemies: {
-        lurker1: { kind: 'lurker', x: 7, y: 4 },
-        darter1: { kind: 'darter', x: 21, y: 15 },
-        // Existence-gated (not present until 'sound-the-deep' is accepted) —
-        // see reduce.js ACCEPT_QUEST / world.js gatedEnemyIds. A fresh,
-        // guaranteed-killable instance, so a free-roam kill can't soft-lock it.
-        'shell-elite1': { kind: 'shell', x: 21, y: 14 },
-        // Existence-gated behind 'the-burning-kind' (see below) — also
-        // deliberately far (chebyshev >= 7) from both the y=10 main current
-        // and every other placed entity, so even once spawned it stays clear
-        // of the fixed demo script's path (src/sim/demo.js, which only ever
-        // walks y=10 then straight to a target column) unless that branch is
-        // actually taken. Verified against content.js's actual blocked/roads
-        // at (13,19).
-        igniter1: { kind: 'igniter', x: 13, y: 19 },
+        igniter1: { kind: 'igniter', x: 13, y: 19 }, // learn-to-listen
+        igniter2: { kind: 'igniter', x: 21, y: 15 }, // the-fleeing-kind
+        igniter3: { kind: 'igniter', x: 26, y: 7 },  // the-burning-kind
+        'igniter-elite1': { kind: 'igniter', x: 21, y: 14 }, // sound-the-deep finale prep
       },
       destructibles: {
         cache1: { x: 14, y: 4, coins: 3 },
@@ -173,6 +186,17 @@ export const CONTENT = {
         vent1: { x: 11, y: 6, radius: 3, strength: 55 },
         vent2: { x: 11, y: 15, radius: 3, strength: 55 },
       },
+      // Torches: unlit fixtures the player ignites (INTERACT range 1 — see
+      // reduce.js's LIGHT_TORCH case), permanent once lit. Bigger than a vent
+      // (radius/strength) since their whole purpose is shrinking an
+      // Igniter's viable dark ground during a hunt — see ai.js's
+      // LIGHT_IDLE_THRESHOLD, which reads this same field. One near each of
+      // the two branch-hunt Igniters (igniter2/igniter3) so lighting one is
+      // a real, useful tactic, not just atmosphere.
+      torches: {
+        torch1: { x: 19, y: 15, radius: 4, strength: 65 },
+        torch2: { x: 23, y: 8, radius: 4, strength: 65 },
+      },
       boss: { id: 'answerer1', kind: 'answerer', x: 29, y: 9 },
     },
   },
@@ -192,7 +216,7 @@ export const CONTENT = {
       hunt2: 'One more — the kind that runs teaches you to listen faster.',
       ledger: 'Wren has more to say. Call, and go back.',
       finale: 'It’s learned enough of your voice to be dangerous. Wren will say what’s left.',
-      hunt3: 'Break the Shell of the deep — and take back what it swallowed.',
+      hunt3: 'Corner the last of them, deep in the reach — and take back what it guards.',
       arena: 'The way to the Answerer stands open. Go to the hollow at the reach’s end.',
       boss: 'The Answerer. Whatever happens here decides whether the deep keeps your voice.',
       choice: 'It falls silent, beaten. Decide what becomes of the voice it stole.',
@@ -231,12 +255,13 @@ export const CONTENT = {
       // roles on separate NPCs sidesteps it entirely (game 3's #E3 lesson).
       giver: 'wren',
       requires: ['into-the-dark'],
-      objectives: [{ type: 'kill', target: 'lurker', n: 1 }],
+      objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
       reward: { coins: 5 },
-      // Existence-gated (not present until this quest is accepted) — lurker1 is
-      // the ONLY free lurker, so leaving it free-roam let a player kill it
-      // before accepting this quest, permanently soft-locking the objective.
-      unlocks: { enemies: ['lurker1'] },
+      // Existence-gated (not present until this quest is accepted) —
+      // igniter1 is the only free Igniter, so leaving it free-roam let a
+      // player catch it before accepting this quest, permanently
+      // soft-locking the objective.
+      unlocks: { enemies: ['igniter1'] },
     },
     // A real branch point, not a straight line: 'the-fleeing-kind' and
     // 'the-burning-kind' are both offered the moment 'learn-to-listen'
@@ -244,15 +269,15 @@ export const CONTENT = {
     // done (requiresAny — an OR prereq, see reduce.js's TALK case and
     // validate.js). The other stays available afterward (talk to Wren
     // again) for a player who wants both, but nothing gates progress on
-    // completing both. This is the structural divergence from a strictly
-    // linear "reach -> kill -> kill -> collect -> ..." chain.
+    // completing both. Both hunts are the same creature (there's only one
+    // kind now) — the branch is WHICH hunt you take, not which monster.
     'the-fleeing-kind': {
       name: 'The Fleeing Kind',
       giver: 'wren',
       requires: ['learn-to-listen'],
-      objectives: [{ type: 'kill', target: 'darter', n: 1 }],
+      objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
       reward: { coins: 5 },
-      unlocks: { enemies: ['darter1'] },
+      unlocks: { enemies: ['igniter2'] },
     },
     'the-burning-kind': {
       name: 'The Burning Kind',
@@ -260,10 +285,7 @@ export const CONTENT = {
       requires: ['learn-to-listen'],
       objectives: [{ type: 'kill', target: 'igniter', n: 1 }],
       reward: { coins: 5 },
-      // Existence-gated the same way as every other quest-tied kill target —
-      // igniter1 doesn't exist in state.enemies until this quest is
-      // accepted, so a free-roam kill can't soft-lock the objective.
-      unlocks: { enemies: ['igniter1'] },
+      unlocks: { enemies: ['igniter3'] },
     },
     'the-sounding-line': {
       name: 'The Sounding Line',
@@ -281,12 +303,12 @@ export const CONTENT = {
       giver: 'wren',
       requires: ['the-sounding-line'],
       objectives: [
-        { type: 'kill', target: 'shell', n: 1 },
+        { type: 'kill', target: 'igniter', n: 1 },
         { type: 'collect', item: 'chorus-shard' },
         { type: 'reach', zone: 'the-hollow' },
       ],
       reward: { coins: 16 },
-      unlocks: { enemies: ['shell-elite1'], pickups: ['chorusshard1'] },
+      unlocks: { enemies: ['igniter-elite1'], pickups: ['chorusshard1'] },
     },
   },
 };
