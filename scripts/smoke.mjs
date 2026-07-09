@@ -25,7 +25,7 @@ import { echoDistanceMap, revealSet, heardAt } from '../src/sim/sound.js';
 import { recomputeLight, lightAt } from '../src/sim/light.js';
 import { igniteAt, stepFire, isWater, FIRE_FUEL_TICKS } from '../src/sim/fire.js';
 
-const GOLDEN_DEMO_FINGERPRINT = '6d90893c';
+const GOLDEN_DEMO_FINGERPRINT = '0bb6cf95';
 
 const failures = [];
 let count = 0;
@@ -240,6 +240,16 @@ test('echoDistanceMap is a BFS field: 0 at origin, walls absent, bends around a 
   assert(!dm.has('5,5'), 'a wall tile must never be in the open-tile field');
   assert(dm.has('6,5'), 'sound should bend around the single wall to reach the far side');
   assert(dm.get('6,5') >= 2, 'the detour around the wall must cost more than the blocked straight line');
+});
+test('hasPinged starts false and flips true (permanently) on the first PING — the onboarding skill-gate', () => {
+  const w = makeWorld(1);
+  assertEqual(w.player.hasPinged, 0, 'a fresh world should start un-pinged (renderer.js: no ambient sight radius yet)');
+  reduce(w, { type: 'MOVE', dx: 1, dy: 0 });
+  assertEqual(w.player.hasPinged, 0, 'moving alone must not open the ambient sight gate');
+  reduce(w, { type: 'PING' });
+  assertEqual(w.player.hasPinged, 1, 'a PING should flip hasPinged');
+  reduce(w, { type: 'TICK' });
+  assertEqual(w.player.hasPinged, 1, 'hasPinged is one-way — it must never reset');
 });
 test('a PING lights nearby tiles and leaves far tiles dark', () => {
   const w = makeWorld(1);

@@ -146,18 +146,28 @@ export function render(ctx, w, view, now = 0) {
   // A tile's visibility is graduated (0-100), the MAX of whichever modality
   // currently reaches it: a small always-on AMBIENT radius, a recent echo
   // pulse (state.echo.lit, momentary), or a persistent light source
-  // (state.light.tiles, src/sim/light.js — a fixed vent, or later a fire/lit
-  // bottle/the charged aura). All three are authoritative; this is a pure
+  // (state.light.tiles, src/sim/light.js — a fixed vent, fire, a thrown
+  // bottle, or the charged aura). All three are authoritative; this is a pure
   // read, never a write. `visible` is the boolean draw-gate; `tileLight` is
   // also used for the light-gem HUD reading the PLAYER'S OWN tile — a
   // graduated exposure readout has to ship WITH a light-based system, not
   // after, or the player can't reason about how visible THEY currently are.
+  //
+  // AMBIENT itself is gated on state.player.hasPinged: before the very first
+  // PING, there is no ambient radius at all — the world is genuinely black
+  // except the player's own tile (a small self-only floor, just enough to
+  // feel your footing) — so the first thing a new player learns is "make a
+  // sound to see," discovered by having no other option, not read off a
+  // tutorial string. One authoritative flag (reduce.js's PING case), no
+  // separate onboarding system.
   const AMBIENT = 2;
+  const SELF_ONLY_FLOOR = 15;
   const litMap = w.echo && w.echo.lit ? w.echo.lit : {};
   const lightMap = w.light && w.light.tiles ? w.light.tiles : {};
   const tileLight = (tx, ty) => {
     let level = 0;
-    if (Math.max(Math.abs(tx - w.player.x), Math.abs(ty - w.player.y)) <= AMBIENT) level = Math.max(level, 45);
+    if (tx === w.player.x && ty === w.player.y) level = Math.max(level, SELF_ONLY_FLOOR);
+    if (w.player.hasPinged && Math.max(Math.abs(tx - w.player.x), Math.abs(ty - w.player.y)) <= AMBIENT) level = Math.max(level, 45);
     if (Object.prototype.hasOwnProperty.call(litMap, `${tx},${ty}`)) level = Math.max(level, 85);
     const lv = lightMap[`${tx},${ty}`];
     if (lv) level = Math.max(level, lv);

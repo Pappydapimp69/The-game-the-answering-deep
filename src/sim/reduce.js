@@ -339,6 +339,7 @@ function reduceCore(state, command) {
       const loud = !!command.loud;
       if (loud && state.player.aura < LOUD_PING_COST) return [{ type: 'no_aura', need: LOUD_PING_COST }];
       if (loud) state.player.aura -= LOUD_PING_COST;
+      state.player.hasPinged = 1; // one-way: the ambient sight radius gate opens for good
       return applyPing(state, state.player.x, state.player.y, loud);
     }
 

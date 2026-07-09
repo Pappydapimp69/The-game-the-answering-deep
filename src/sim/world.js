@@ -14,7 +14,10 @@ import { recomputeLight } from './light.js';
 // .1: added state.light (persistent light sources) — an old save lacking it
 // would throw the first time anything reads state.light.tiles.
 // .2: added state.hazards (fire/molotov), player.onFireTicks/lastChargeTick, enemy.throwCooldown.
-export const WORLD_VERSION = 'answeringdeep4.2';
+// .3: added player.hasPinged (an old save's players have certainly pinged by
+// now, but reading it as falsy would wrongly re-blind them — route to New
+// Game instead of a false start-of-game readout).
+export const WORLD_VERSION = 'answeringdeep4.3';
 
 export function makeWorld(seed, options = {}) {
   if (!Number.isInteger(seed)) throw new Error('makeWorld: seed must be an integer');
@@ -96,6 +99,12 @@ export function makeWorld(seed, options = {}) {
       aura: 0, maxAura: arch.aura,
       chargeHold: 0,
       onFireTicks: 0, lastChargeTick: -999,
+      // Before the first PING, the renderer's ambient sight radius stays off
+      // entirely (src/app/renderer.js's tileLight) — the deep starts totally
+      // dark, not dimly lit, so the very first thing a new player learns is
+      // "make a sound to see" by discovering it has no alternative, not by
+      // reading it. Set once, true forever, in reduce.js's PING case.
+      hasPinged: 0,
       coins: 0,
       skills,
       inventory: [],
