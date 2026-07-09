@@ -5,12 +5,13 @@
 // (saga.v2) code. Layout is centered and scales with the viewport so it reads
 // on any monitor (text uses its own scale, separate from any world scale).
 
-import { makeInput } from './input.js';
+import { makeInput, REBINDABLE_ACTIONS } from './input.js';
 import { COLORS } from './renderer.js';
 import { CONTENT } from '../sim/content.js';
 import { hasSave, loadGame, clearSave } from './save.js';
-import { withHint } from './device-labels.js';
+import { withHint, keyHint } from './device-labels.js';
 import { importSaga } from '../sim/saga.js';
+import { makeBindingsUI } from './bindings-ui.js';
 
 function btn(ctx, z, device, u) {
   ctx.fillStyle = 'rgba(136,146,176,0.14)';
@@ -27,6 +28,7 @@ export function runTitle(canvas) {
   return new Promise((resolve) => {
     const ctx = canvas.getContext('2d');
     const input = makeInput(canvas);
+    const bindingsUI = makeBindingsUI();
     let screen = 'menu';
     let archIdx = 0;
     const archIds = Object.keys(CONTENT.archetypes);
@@ -71,6 +73,9 @@ export function runTitle(canvas) {
         if (id === 'start') resolve({ action: 'new', archetype: archIds[archIdx], difficulty, saga });
       } else if (screen === 'controls') {
         if (id === 'back') screen = 'menu';
+        if (id === 'bindings') screen = 'bindings';
+      } else if (screen === 'bindings') {
+        if (id === 'back') { bindingsUI.cancel(); screen = 'controls'; }
       }
     }
 
@@ -118,14 +123,23 @@ export function runTitle(canvas) {
         zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: H * 0.3 + 274 * u, w: 130 * u, h: 30 * u }, device, u));
       } else if (screen === 'controls') {
         ctx.fillStyle = COLORS.dim; ctx.font = `${13 * u}px system-ui, sans-serif`;
+        const kh = (a) => keyHint('keyboard', a), gh = (a) => keyHint('gamepad', a);
         const lines = [
-          'The deep is dark. PING (Q) to send a pulse that reveals what it touches — but everything with ears turns toward where you called from.',
-          'Keyboard — Move WASD · Ping Q · Pulse F (loud, costs aura) · Attack J · Blast K · Charge L · Interact E · Items I · Dodge Space',
-          'Gamepad — Move Stick/D-Pad · Ping LB · Pulse RT · Attack A · Blast X · Charge Y · Interact RB · Dodge B',
+          `The deep is dark. PING (${kh('ping')}) to send a pulse that reveals what it touches — but everything with ears turns toward where you called from.`,
+          `Keyboard — Move WASD · Ping ${kh('ping')} · Pulse ${kh('pulse')} (loud, costs aura) · Attack ${kh('attack')} · Blast ${kh('blast')} · Charge ${kh('charge')} · Interact ${kh('interact')} · Items ${kh('inventory')} · Dodge ${kh('dodge')}`,
+          `Gamepad — Move Stick/D-Pad · Ping ${gh('ping')} · Pulse ${gh('pulse')} · Attack ${gh('attack')} · Blast ${gh('blast')} · Charge ${gh('charge')} · Interact ${gh('interact')} · Dodge ${gh('dodge')}`,
           'Touch — on-screen pad and buttons. A blast needs a lit target: pulse to see it first.',
         ];
         lines.forEach((l, i) => ctx.fillText(l, cx, H * 0.4 + i * 24 * u, W - 40 * u));
-        zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: H * 0.4 + 120 * u, w: 130 * u, h: 30 * u }, device, u));
+        zones.push(btn(ctx, { id: 'bindings', label: 'Edit bindings', x: cx - 100 * u, y: H * 0.4 + 120 * u, w: 200 * u, h: 32 * u }, device, u));
+        zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: H * 0.4 + 160 * u, w: 130 * u, h: 30 * u }, device, u));
+      } else if (screen === 'bindings') {
+        ctx.fillStyle = COLORS.text; ctx.font = `bold ${13 * u}px system-ui, sans-serif`;
+        ctx.fillText('Gameplay bindings — click a chip to rebind (Esc cancels)', cx, H * 0.28);
+        const listY = H * 0.28 + 34 * u, rowH = 26 * u;
+        zones.push(...bindingsUI.draw(ctx, cx - 150 * u, listY, 300 * u, rowH, u));
+        const backY = listY + REBINDABLE_ACTIONS.length * rowH + 56 * u;
+        zones.push(btn(ctx, { id: 'back', hintAction: 'cancel', label: 'Back', x: cx - 65 * u, y: backY, w: 130 * u, h: 30 * u }, device, u));
       }
       ctx.textAlign = 'left';
       input.setZones(zones);
@@ -154,10 +168,18 @@ export function runTitle(canvas) {
         if (presses.cancel) handlePress('no');
       } else if (screen === 'controls') {
         if (presses.cancel || presses.confirm) handlePress('back');
+      } else if (screen === 'bindings') {
+        const wasCapturing = bindingsUI.capturing;
+        bindingsUI.step(move, presses, lastDy);
+        if (!wasCapturing && !bindingsUI.capturing && presses.cancel) handlePress('back');
       }
       lastDy = move.dy; lastDx = move.dx;
 
-      for (const z of zones) { if (presses[z.id]) handlePress(z.id); }
+      for (const z of zones) {
+        if (!presses[z.id]) continue;
+        if (screen === 'bindings' && z.id !== 'back') bindingsUI.handleZone(z.id);
+        else handlePress(z.id);
+      }
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);

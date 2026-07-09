@@ -3,21 +3,109 @@
 // POLLED every frame (the connect event only fires after a button press).
 // Action intents are edge-triggered here so one press = one action, no matter
 // which device fired it or how many systems read the frame.
+//
+// The 8 gameplay actions (attack/blast/charge/interact/inventory/dodge/ping/
+// pulse) are player-rebindable. Movement and the confirm/cancel menu
+// meta-keys are fixed on purpose — see FIXED_KEYMAP/FIXED_PAD below.
+// Bindings are a MODULE-LEVEL singleton, not per-makeInput()-instance: the
+// title screen and the live game are separate makeInput() calls on the same
+// page, and a rebind made from either screen's UI must apply everywhere
+// immediately (and survive the makeInput() call that follows it).
+
+import { loadBindings, saveBindings } from './save.js';
 
 const ACTIONS = ['attack', 'blast', 'charge', 'interact', 'inventory', 'dodge', 'ping', 'pulse', 'confirm', 'cancel', 'alt'];
 
-const KEYMAP = {
-  KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
-  KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-  KeyJ: 'attack', KeyK: 'blast', KeyL: 'charge', KeyE: 'interact', KeyI: 'inventory',
-  // The signature verbs of The Answering Deep: Q = a free quiet listen,
-  // F = a loud aura pulse (sees/heard far). Both are edge-triggered actions.
-  KeyQ: 'ping', KeyF: 'pulse',
-  Space: 'dodge', Enter: 'confirm', Escape: 'cancel',
+export const REBINDABLE_ACTIONS = ['attack', 'blast', 'charge', 'interact', 'inventory', 'dodge', 'ping', 'pulse'];
+export const ACTION_LABELS = {
+  attack: 'Attack', blast: 'Blast', charge: 'Charge', interact: 'Interact',
+  inventory: 'Inventory', dodge: 'Dodge', ping: 'Ping', pulse: 'Pulse',
 };
 
-// Standard-mapping gamepad buttons.
-const PAD = { attack: 0, dodge: 1, blast: 2, charge: 3, interact: 5, inventory: 9, ping: 4, pulse: 7, confirm: 0, cancel: 1 };
+// Movement + menu meta-keys: never rebindable, and a gameplay action can
+// never be bound onto one of these codes (would shadow movement/menu nav).
+const FIXED_KEYMAP = {
+  KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
+  KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+  Enter: 'confirm', Escape: 'cancel',
+};
+const RESERVED_CODES = new Set(Object.keys(FIXED_KEYMAP));
+
+// Defaults match the previous hardcoded KEYMAP exactly — an unmodified save
+// (or first run, before bindings.js ever wrote a key) plays identically.
+const DEFAULT_KEYS = {
+  attack: 'KeyJ', blast: 'KeyK', charge: 'KeyL', interact: 'KeyE', inventory: 'KeyI',
+  // The signature verbs of The Answering Deep: Q = a free quiet listen,
+  // F = a loud aura pulse (sees/heard far). Both are edge-triggered actions.
+  ping: 'KeyQ', pulse: 'KeyF', dodge: 'Space',
+};
+
+// Standard-mapping gamepad buttons (defaults, also match the previous PAD).
+const DEFAULT_PAD = { attack: 0, dodge: 1, blast: 2, charge: 3, interact: 5, inventory: 9, ping: 4, pulse: 7 };
+const FIXED_PAD = { confirm: 0, cancel: 1 }; // menu meta-buttons, not rebindable
+
+// Drops anything invalid (reserved code, duplicate within the gameplay set,
+// stale/foreign JSON) back to the matching default — a corrupt or old-shape
+// bindings blob degrades to "play like nothing was ever rebound," never to
+// a crash or a silently broken control.
+function sanitizeBindings(raw) {
+  const keys = {}, pad = {};
+  const usedKeys = new Set(), usedPad = new Set();
+  for (const a of REBINDABLE_ACTIONS) {
+    const k = raw && raw.keys && raw.keys[a];
+    keys[a] = (typeof k === 'string' && !RESERVED_CODES.has(k) && !usedKeys.has(k)) ? k : DEFAULT_KEYS[a];
+    usedKeys.add(keys[a]);
+    const p = raw && raw.pad && raw.pad[a];
+    pad[a] = (Number.isInteger(p) && p >= 0 && !usedPad.has(p)) ? p : DEFAULT_PAD[a];
+    usedPad.add(pad[a]);
+  }
+  return { keys, pad };
+}
+
+let bindings = sanitizeBindings(loadBindings());
+let keyMap = buildKeyMap();
+
+function buildKeyMap() {
+  const map = { ...FIXED_KEYMAP };
+  for (const a of REBINDABLE_ACTIONS) map[bindings.keys[a]] = a;
+  return map;
+}
+function persist() { saveBindings(bindings); }
+
+// Fresh copies out — callers (bindings UI, device-labels) must never mutate
+// the live tables directly, only through setBinding/setPadBinding below.
+export function getBindings() {
+  return { keys: { ...bindings.keys }, pad: { ...bindings.pad } };
+}
+
+export function setBinding(action, code) {
+  if (!REBINDABLE_ACTIONS.includes(action)) return { ok: false, error: 'not rebindable' };
+  if (RESERVED_CODES.has(code)) return { ok: false, error: 'reserved for movement/menu' };
+  for (const a of REBINDABLE_ACTIONS) {
+    if (a !== action && bindings.keys[a] === code) return { ok: false, error: `already bound to ${ACTION_LABELS[a]}` };
+  }
+  bindings.keys[action] = code;
+  keyMap = buildKeyMap();
+  persist();
+  return { ok: true };
+}
+
+export function setPadBinding(action, index) {
+  if (!REBINDABLE_ACTIONS.includes(action)) return { ok: false, error: 'not rebindable' };
+  if (!Number.isInteger(index) || index < 0) return { ok: false, error: 'invalid button' };
+  for (const a of REBINDABLE_ACTIONS) {
+    if (a !== action && bindings.pad[a] === index) return { ok: false, error: `already bound to ${ACTION_LABELS[a]}` };
+  }
+  bindings.pad[action] = index;
+  persist();
+  return { ok: true };
+}
+
+export function resetBindings() {
+  bindings = sanitizeBindings(null);
+  keyMap = buildKeyMap();
+  persist();
+}
 
 export function makeInput(canvas) {
   const held = {};          // logical name -> bool (keyboard)
@@ -29,7 +117,7 @@ export function makeInput(canvas) {
   let touchZones = [];       // set each frame by the renderer (screen-space)
 
   window.addEventListener('keydown', (e) => {
-    const name = KEYMAP[e.code];
+    const name = keyMap[e.code];
     if (!name) return;
     e.preventDefault();
     held[name] = true;
@@ -37,7 +125,7 @@ export function makeInput(canvas) {
     device = 'keyboard';
   });
   window.addEventListener('keyup', (e) => {
-    const name = KEYMAP[e.code];
+    const name = keyMap[e.code];
     if (name) held[name] = false;
   });
 
@@ -105,8 +193,11 @@ export function makeInput(canvas) {
       if (ax > 0.4 || gp.buttons[15]?.pressed) { down.right = true; any = true; }
       if (ay < -0.4 || gp.buttons[12]?.pressed) { down.up = true; any = true; }
       if (ay > 0.4 || gp.buttons[13]?.pressed) { down.down = true; any = true; }
-      for (const a of Object.keys(PAD)) {
-        if (gp.buttons[PAD[a]]?.pressed) { down[a] = true; any = true; }
+      for (const a of Object.keys(FIXED_PAD)) {
+        if (gp.buttons[FIXED_PAD[a]]?.pressed) { down[a] = true; any = true; }
+      }
+      for (const a of REBINDABLE_ACTIONS) {
+        if (gp.buttons[bindings.pad[a]]?.pressed) { down[a] = true; any = true; }
       }
       if (any) device = 'gamepad';
     }

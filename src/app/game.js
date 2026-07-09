@@ -18,11 +18,12 @@ import { reduce } from '../sim/reduce.js';
 import { CONTENT } from '../sim/content.js';
 import { exportSaga } from '../sim/saga.js';
 import { readonly } from './readonly.js';
-import { makeInput } from './input.js';
-import { render } from './renderer.js';
+import { makeInput, REBINDABLE_ACTIONS } from './input.js';
+import { render, COLORS } from './renderer.js';
 import { saveGame, clearSave } from './save.js';
 import { nightAmount } from './daynight-tint.js';
 import { makeAudio } from './audio.js';
+import { makeBindingsUI } from './bindings-ui.js';
 
 const MOVE_REPEAT_MS = 140;
 const TICK_MS = 500;
@@ -38,6 +39,8 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
   const ctx = canvas.getContext('2d');
   const input = makeInput(canvas);
   const audio = makeAudio();
+  const bindingsUI = makeBindingsUI();
+  let bindingsOpen = false; // full-screen overlay, drawn/handled outside the modal system
 
   let world = initialWorld || makeWorld(seed, options);
   let ro = readonly(world);
@@ -227,6 +230,10 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
 
   function runOption(m, opt) {
     switch (m.kind) {
+      case 'pause':
+        if (opt.id === 'bindings') { closeModal(); bindingsOpen = true; }
+        else closeModal();
+        break;
       case 'dialog': case 'defeat': case 'finale':
         if (m.kind === 'defeat') { world = JSON.parse(respawn); ro = readonly(world); saveGame(world); closeModal(); toast('You rise where you began.'); }
         else if (m.kind === 'finale') { if (navigator.clipboard?.writeText) navigator.clipboard.writeText(m.code).catch(() => {}); toast('Code copied. See you at the next crossing.'); closeModal(); }
@@ -285,7 +292,12 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     if (presses.cancel && m.kind !== 'fate' && m.kind !== 'defeat') closeModal();
   }
 
+  function openPause() {
+    view.modal = mkModal('pause', 'Paused', [], [{ id: 'resume', label: 'Resume' }, { id: 'bindings', label: 'Bindings' }]);
+  }
+
   function handleWorld(now, move, presses, chargeHeld) {
+    if (presses.cancel) { openPause(); return; }
     if (presses.inventory) { openInventory(); return; }
     if (presses.dodge) { dodgeUntil = now + DODGE_MS; toast('Dodge!'); }
 
@@ -373,12 +385,54 @@ export function startGame(canvas, seed, options = {}, initialWorld = null) {
     return g.hunt1;
   }
 
+  // Drawn over whatever the last real frame left in the canvas (the world is
+  // fully paused, so redrawing it would be wasted work) — same translucent
+  // full-screen treatment as drawModal in renderer.js.
+  function drawBindingsOverlay() {
+    const W = canvas.width, H = canvas.height;
+    const u = Math.max(0.8, Math.min(3, H / 540));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgba(3,5,12,0.9)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = COLORS.text; ctx.font = `bold ${17 * u}px system-ui, sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText('Bindings', W / 2, 56 * u);
+    ctx.textAlign = 'left';
+    const listX = W / 2 - 150 * u, listY = 96 * u, rowH = 28 * u;
+    const zones = bindingsUI.draw(ctx, listX, listY, 300 * u, rowH, u);
+    const backY = listY + REBINDABLE_ACTIONS.length * rowH + 56 * u;
+    const back = { id: 'bindings-back', x: W / 2 - 65 * u, y: backY, w: 130 * u, h: 30 * u };
+    ctx.fillStyle = 'rgba(136,146,176,0.16)'; ctx.strokeStyle = 'rgba(136,146,176,0.6)';
+    ctx.fillRect(back.x, back.y, back.w, back.h); ctx.strokeRect(back.x, back.y, back.w, back.h);
+    ctx.fillStyle = COLORS.text; ctx.font = `bold ${13 * u}px system-ui, sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText('Back', back.x + back.w / 2, back.y + back.h / 2 + 5 * u);
+    ctx.textAlign = 'left';
+    zones.push(back);
+    return zones;
+  }
+
   function frame(now) {
     const dt = Math.min(now - last || 16, MAX_FRAME_MS);
     last = now; frameNow = now;
 
     const { move, presses, device, chargeHeld, blastHeld } = input.poll();
     view.device = input.hasTouch && device === 'keyboard' ? 'touch' : device;
+
+    // Bindings overlay fully pauses the world (no handleWorld/handleModal
+    // call at all) — a rebind capture must never race a live enemy strike.
+    if (bindingsOpen) {
+      const wasCapturing = bindingsUI.capturing;
+      bindingsUI.step(move, presses, lastModalDy);
+      lastModalDy = move.dy;
+      if (!wasCapturing && !bindingsUI.capturing && presses.cancel) bindingsOpen = false;
+      const zones = drawBindingsOverlay();
+      for (const z of zones) {
+        if (!presses[z.id]) continue;
+        if (z.id === 'bindings-back') bindingsOpen = false;
+        else bindingsUI.handleZone(z.id);
+      }
+      input.setZones(zones);
+      requestAnimationFrame(frame);
+      return;
+    }
 
     const frozen = now < hitStopUntil;
     if (!frozen) {
