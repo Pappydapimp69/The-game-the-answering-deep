@@ -56,26 +56,54 @@ function auraFlameAlpha(view, now) {
   }
   return 0;
 }
-function drawAuraFlame(ctx, cx, topY, alpha, now) {
+// A ring of anchor angles the licks flicker around — 8-way, evenly spaced,
+// so the flame wraps the FULL silhouette (sides and back included) instead
+// of clustering at one point. That single-point-at-the-head version was the
+// exact "looks like a hat" complaint this replaces.
+const AURA_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315].map((d) => (d * Math.PI) / 180);
+
+function drawAuraFlame(ctx, cx, cy, alpha, now, radiusScale = 1) {
   const t = now * 0.006;
-  const flicker = Math.sin(t) * 2;
-  const flicker2 = Math.sin(t * 1.7 + 1) * 1.5;
   ctx.save();
   ctx.globalAlpha = alpha;
-  const grad = ctx.createLinearGradient(0, topY, 0, topY - TILE * 0.9);
-  grad.addColorStop(0, 'rgba(126,200,255,0.9)');
-  grad.addColorStop(1, 'rgba(126,200,255,0)');
-  ctx.fillStyle = grad;
-  drawLick(ctx, cx - 4 + flicker * 0.4, topY, TILE * 0.22, TILE * 0.55);
-  drawLick(ctx, cx + flicker, topY, TILE * 0.28, TILE * 0.75);
-  drawLick(ctx, cx + 4 + flicker2 * 0.4, topY, TILE * 0.2, TILE * 0.5);
+  ctx.globalCompositeOperation = 'lighter'; // additive — licks overlap into a brighter glow, never a flat stack
+
+  // Ambient glow filling the whole nimbus, so there's presence in the gaps
+  // between licks, not just where a tongue of flame happens to be.
+  const glowR = TILE * 0.85 * radiusScale;
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  glow.addColorStop(0, 'rgba(126,200,255,0.35)');
+  glow.addColorStop(1, 'rgba(126,200,255,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
+
+  // Licks anchored around the ring, each pointing radially OUTWARD from its
+  // own anchor (not all "up") — this is what actually reads as surrounding
+  // the body rather than sitting on top of it.
+  const ringR = TILE * 0.42 * radiusScale;
+  AURA_ANGLES.forEach((baseAngle, i) => {
+    const angle = baseAngle + Math.sin(t * 1.3 + i * 1.7) * 0.12;
+    const ax = cx + Math.cos(angle) * ringR, ay = cy + Math.sin(angle) * ringR;
+    const len = TILE * (0.38 + 0.12 * Math.sin(t * 1.6 + i)) * radiusScale;
+    drawLickAt(ctx, ax, ay, angle, TILE * 0.22 * radiusScale, len);
+  });
   ctx.restore();
 }
-function drawLick(ctx, x, baseY, width, height) {
+
+// A single flame lick anchored at (x,y), tapering to a point along `angle`
+// (radians) — the rotate-able generalization of the old fixed-up-only lick.
+function drawLickAt(ctx, x, y, angle, width, length) {
+  const tipX = x + Math.cos(angle) * length, tipY = y + Math.sin(angle) * length;
+  const grad = ctx.createLinearGradient(x, y, tipX, tipY);
+  grad.addColorStop(0, 'rgba(126,200,255,0.85)');
+  grad.addColorStop(1, 'rgba(126,200,255,0)');
+  ctx.fillStyle = grad;
+  const perpX = -Math.sin(angle), perpY = Math.cos(angle);
+  const midX = x + Math.cos(angle) * length * 0.55, midY = y + Math.sin(angle) * length * 0.55;
   ctx.beginPath();
-  ctx.moveTo(x - width / 2, baseY);
-  ctx.quadraticCurveTo(x - width * 0.6, baseY - height * 0.5, x, baseY - height);
-  ctx.quadraticCurveTo(x + width * 0.6, baseY - height * 0.5, x + width / 2, baseY);
+  ctx.moveTo(x + (perpX * width) / 2, y + (perpY * width) / 2);
+  ctx.quadraticCurveTo(midX + perpX * width * 0.3, midY + perpY * width * 0.3, tipX, tipY);
+  ctx.quadraticCurveTo(midX - perpX * width * 0.3, midY - perpY * width * 0.3, x - (perpX * width) / 2, y - (perpY * width) / 2);
   ctx.closePath();
   ctx.fill();
 }
@@ -220,6 +248,11 @@ export function render(ctx, w, view, now = 0) {
   const ppx = view.px * TILE, ppy = view.py * TILE;
   add(view.px, view.py, () => {
     if (view.dodging) ctx.globalAlpha = 0.45;
+    // Drawn BEFORE the sprite, centered on the whole silhouette (not the
+    // head) — the flame surrounds the body and the character stands IN it,
+    // rather than the flame sitting on top like a hat.
+    const auraAlpha = auraFlameAlpha(view, now);
+    if (auraAlpha > 0) drawAuraFlame(ctx, ppx + TILE / 2, ppy + TILE * 0.55, auraAlpha, now);
     const key = view.charging ? 'charge' : `${view.facing === 'left' || view.facing === 'right' ? 'side' : view.facing}-${view.walkFrame}`;
     const def = PLAYER_SPRITES[key] || PLAYER_SPRITES['down-0'];
     if (view.facing === 'right') {
@@ -231,8 +264,6 @@ export function render(ctx, w, view, now = 0) {
     } else {
       drawPixelSprite(ctx, def, ppx, ppy, TILE);
     }
-    const auraAlpha = auraFlameAlpha(view, now);
-    if (auraAlpha > 0) drawAuraFlame(ctx, ppx + TILE / 2, ppy + TILE * 0.2, auraAlpha, now);
     ctx.globalAlpha = 1;
   });
 
